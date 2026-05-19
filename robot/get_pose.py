@@ -11,9 +11,7 @@ if __name__ == "__main__":
     robot = UR3Controller("192.168.0.25")
     robot.connect()
 
-    print("Current pose before capture:", robot.get_pose())
-
-    pose = robot.capture_zero_pose()
-    print("Zero pose captured and saved:", pose)
+    pose = robot.get_pose()
+    print("Pose captured:", pose)
 
     robot.disconnect()
