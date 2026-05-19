@@ -316,7 +316,6 @@ class UR3Controller:
         if safe_z is not None:
             current_pose = self.get_pose()
             if current_pose:
-                # Express current pose in zero frame to compare Z levels
                 via_relative = list(coords)
                 via_relative[2] = safe_z
                 via_abs = self._apply_reference_frame(via_relative)
