@@ -18,42 +18,47 @@ def send(robot, coords):
 
 if __name__ == "__main__":
 
+
     load_dotenv(verbose=True)
     
     robot_ip = os.environ.get('ROBOT_IP')
 
     robot = UR3Controller("192.168.0.25")
-    
-    robot.connect()
-    
+    try:
+        robot.connect()
+        robot.gripper.activate()
+        
 
-    robot.set_workspace_limits(x=(-1.5, 1.5), y=(-1.5, 0.1), z=(-1.10, 1.55))
+        robot.release_object()
 
-    scale = [0.001, -0.001, -0.001]
-    translation = [0,0,0]
-    rotation = [0,0,0]
+        robot.set_workspace_limits(x=(-1.5, 1.5), y=(-1.5, 0.1), z=(-1.10, 1.55))
 
-    # x, y, z , rx, ry, rz
-    # mm, mm, mm, deg, deg, deg
+        scale = [0.001, -0.001, -0.001]
+        translation = [0,0,0]
+        rotation = [0,0,0]
 
-    send(robot, [[0, 0, 100, 0, 0, 0],
-                [0, 0, 100, 0, 10, 0],
-                [0, 0, 100, 0, -10, 0],
-                [0, 0, 100, 0, 0, 0],
-                [0, 0, 100, 10, 0, 0],
-                [0, 0, 100, -10, 0, 0],
-                [0, 0, 100, 0, 0, 0],
-                [0, 0, 100, 0, 0, 90],
-                [0, 0, 100, 0, 10, 90],
-                [0, 0, 100, 0, -10, 90],
-                [0, 0, 100, 0, 0, 90],
-                [0, 0, 100, 10, 0, 90],
-                [0, 0, 100, -10, 0, 90],
-                [0, 0, 100, 0, 0, 90]])
+        # coordinates
+        # x, y, z , rx, ry, rz
+        # mm, mm, mm, deg, deg, deg
+
+        send(robot, [[0, 0, 100, 0, 0, 90],
+                     [0, 0, 100, -45, 0, 90],
+                     [0, 0, 10, -45, 0, 90],])
+        
+        robot.grab_object()
+
+        send(robot, [[0, 0, 100, -45, 0, 90],
+                [0, 0, 100, 45, 0, 90],
+                [0, 0, 10, 45, 0, 90],])
+        
+        robot.release_object()
+
+        send(robot, [[0, 0, 100, 45, 0, 90],
+                [0, 0, 100, 0, 0, 90],])
+
+    finally:
+        robot.disconnect()
 
 
-    robot.disconnect()
 
-
-
-    
+        
