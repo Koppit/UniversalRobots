@@ -344,6 +344,28 @@
     #calib-result.ok  { background: #14532d22; color: #86efac; }
     #calib-result.err { background: #450a0a22; color: #fca5a5; }
 
+    /* ── Speech ── */
+    #btn-mic {
+      background: #334155;
+      border: none;
+      border-radius: 50%;
+      width: 42px; height: 42px;
+      font-size: 18px;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s;
+      flex-shrink: 0;
+    }
+    #btn-mic:hover:not(:disabled) { background: #4f46e5; }
+    #btn-mic.listening { background: #dc2626; box-shadow: 0 0 10px #dc262688; animation: pulse 1s infinite; }
+    #btn-mic:disabled { opacity: 0.4; cursor: not-allowed; }
+    @keyframes pulse { 0%,100% { box-shadow: 0 0 8px #dc262688; } 50% { box-shadow: 0 0 18px #dc2626cc; } }
+    #speech-text {
+      font-size: 12px;
+      color: #64748b;
+      font-style: italic;
+      min-height: 18px;
+    }
+
     /* ── Status bar ── */
     footer {
       background: #1a1d2e;
@@ -458,6 +480,17 @@
         <button class="btn btn-neutral"  id="btn-reset-pp"  onclick="resetPickPlace()" style="display:none">
           Tilbakestill
         </button>
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <!-- Speech / AI assistant -->
+    <div class="ctrl-group" style="min-width:200px">
+      <label>Tale-assistent</label>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button id="btn-mic" onclick="toggleSpeech()" disabled title="Si en kommando">🎤</button>
+        <span id="speech-text">Klikk for å snakke til roboten</span>
       </div>
     </div>
 
@@ -734,6 +767,7 @@
       robotBusy      = s.robot_busy      || false;
       updateRobotChip(robotConnected, robotBusy);
       updatePickPlaceButtons();
+      updateMicButton();
     } catch (_) {
       setDot('error');
       setStatus('Kan ikke nå serveren.');
@@ -836,6 +870,61 @@
       btn.disabled = false;
       refreshCalibPreview();
     }
+  }
+
+  // ── Speech / AI assistant ─────────────────────────────────────────────────
+  let speechRec = null;
+  let speechListening = false;
+
+  function toggleSpeech() {
+    if (speechListening) {
+      if (speechRec) speechRec.stop();
+      return;
+    }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      setStatus('Nettleseren støtter ikke talegjenkjenning (prøv Chrome/Edge).');
+      return;
+    }
+    speechRec = new SR();
+    speechRec.lang = 'no-NO';
+    speechRec.interimResults = false;
+
+    speechRec.onstart = () => {
+      speechListening = true;
+      document.getElementById('btn-mic').classList.add('listening');
+      document.getElementById('speech-text').textContent = 'Lytter…';
+    };
+    speechRec.onend = () => {
+      speechListening = false;
+      document.getElementById('btn-mic').classList.remove('listening');
+    };
+    speechRec.onerror = e => {
+      speechListening = false;
+      document.getElementById('btn-mic').classList.remove('listening');
+      document.getElementById('speech-text').textContent = 'Feil: ' + e.error;
+    };
+    speechRec.onresult = async e => {
+      const text = e.results[0][0].transcript;
+      document.getElementById('speech-text').textContent = '«' + text + '»';
+      setStatus('Sender kommando til agent…');
+      try {
+        const data = await post('/api/assistant/command', { text });
+        if (data.error) setStatus('Feil: ' + data.error);
+        else setStatus('Agent startet: «' + text + '»');
+      } catch (err) {
+        setStatus('Nettverksfeil: ' + err.message);
+      }
+    };
+    speechRec.start();
+  }
+
+  function updateMicButton() {
+    const btn = document.getElementById('btn-mic');
+    btn.disabled = !robotConnected || robotBusy;
+    btn.title = !robotConnected ? 'Koble til robot først'
+               : robotBusy      ? 'Robot er opptatt'
+               :                  'Si en kommando (no-NO)';
   }
 
   // ── Boot ──────────────────────────────────────────────────────────────────

@@ -15,16 +15,18 @@ Return ONLY valid JSON in this exact format:
 Points are [y, x] normalized to 0-1000. No other text.
 """
 
-# Norske og engelske ord som indikerer plukk-operasjon
-PICK_KEYWORDS = {"plukk", "ta", "hent", "grip", "løft", "pick", "grab", "fetch", "lift"}
+# Norske og engelske nøkkelord for plukk- og plasser-operasjoner
+PICK_KEYWORDS  = {"plukk", "ta", "hent", "grip", "løft", "pick", "grab", "fetch", "lift"}
+PLACE_KEYWORDS = {"plasser", "legg", "sett", "slipp", "place", "put", "drop", "set"}
 
 
 class GeminiAgent:
     def __init__(self, api_key: str, tools: list):
-        self._client = genai.Client(api_key=api_key)
-        # tools = [move_to_object, pick_object_at] fra RobotActionTools.get_registered_tools()
-        self._move_fn = tools[0]
-        self._pick_fn = tools[1]
+        self._client   = genai.Client(api_key=api_key)
+        # tools = [move_to_object, pick_object_at, place_object_at]
+        self._move_fn  = tools[0]
+        self._pick_fn  = tools[1]
+        self._place_fn = tools[2]
 
     def run_task(self, frame_b64: str, task: str) -> str:
         image_bytes = base64.b64decode(frame_b64)
@@ -49,9 +51,13 @@ class GeminiAgent:
         ny, nx = int(obj["point"][0]), int(obj["point"][1])
         label = obj.get("label", "objekt")
 
-        if any(w in task.lower() for w in PICK_KEYWORDS):
+        task_lower = task.lower()
+        if any(w in task_lower for w in PICK_KEYWORDS):
             self._pick_fn(ny, nx)
             return f"Plukket opp '{label}' (Y={ny}, X={nx})."
+        elif any(w in task_lower for w in PLACE_KEYWORDS):
+            self._place_fn(ny, nx)
+            return f"Plasserte ved '{label}' (Y={ny}, X={nx})."
         else:
             self._move_fn(ny, nx)
             return f"Flyttet til '{label}' (Y={ny}, X={nx})."

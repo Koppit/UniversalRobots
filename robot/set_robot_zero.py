@@ -2,6 +2,11 @@ from ur3_controller import UR3Controller
 from dotenv import load_dotenv
 import os
 
+"""
+Run only at zero calibration manually. Not to be included in production.
+
+"""
+
 
 if __name__ == "__main__":
     load_dotenv(verbose=True)

@@ -171,8 +171,13 @@ def robot_connect():
     try:
         from robot.ur3_controller import UR3Controller
         from tools.robot_tools import RobotActionTools
-        robot = UR3Controller()
+        robot_ip = os.environ.get("ROBOT_IP", "192.168.0.25")
+        robot = UR3Controller(robot_ip)
         robot.connect()
+        _status_msg = "Aktiverer griper (5 s)…"
+        robot.gripper.activate()
+        robot.release_object()
+        robot.set_workspace_limits(x=(-1.5, 1.5), y=(-1.5, 0.1), z=(-1.10, 1.55))
         _robot = robot
         _robot_tools = RobotActionTools(robot, _homography)
         _status_msg = "Robot tilkoblet."
@@ -228,6 +233,51 @@ def robot_pick_and_place():
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"status": "started"})
+
+
+@app.route("/api/assistant/command", methods=["POST"])
+def assistant_command():
+    global _robot_busy, _status_msg
+    if _robot_tools is None:
+        return jsonify({"error": "Robot ikke tilkoblet."}), 400
+    if not _homography.is_calibrated():
+        return jsonify({"error": "Homografi ikke kalibrert."}), 400
+    if _robot_busy:
+        return jsonify({"error": "Robot er opptatt."}), 409
+
+    text = (request.json or {}).get("text", "").strip()
+    if not text:
+        return jsonify({"error": "Ingen kommandotekst mottatt."}), 400
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return jsonify({"error": "GEMINI_API_KEY mangler."}), 500
+
+    frame = _cam.capture_frame()
+    if frame is None:
+        return jsonify({"error": "Ingen frame fra kamera."}), 500
+
+    import cv2 as _cv2
+    _, buf = _cv2.imencode(".jpg", frame, [_cv2.IMWRITE_JPEG_QUALITY, 85])
+    import base64 as _b64
+    frame_b64 = _b64.b64encode(buf.tobytes()).decode()
+
+    def _run():
+        global _robot_busy, _status_msg
+        _robot_busy = True
+        _status_msg = f"Utfører: «{text}»…"
+        try:
+            from ai.gemini_agent import GeminiAgent
+            agent = GeminiAgent(api_key, tools=_robot_tools.get_registered_tools())
+            result = agent.run_task(frame_b64, text)
+            _status_msg = result
+        except Exception as exc:
+            _status_msg = f"Agent-feil: {exc}"
+        finally:
+            _robot_busy = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"status": "started", "command": text})
 
 
 # ---------------------------------------------------------------------------
