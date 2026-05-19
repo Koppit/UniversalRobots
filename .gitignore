@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Robot calibration data
+robot/zero_pose.json
