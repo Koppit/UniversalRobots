@@ -1,0 +1,5 @@
+opencv-python>=4.8
+numpy>=1.24
+google-genai>=1.0
+ur-rtde
+python-dotenv>=1.0
