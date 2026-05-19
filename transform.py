@@ -21,6 +21,7 @@ def transform_robot_coordinates(
     Parameters
     ----------
     coordinates : list of [x, y, z, rx, ry, rz]
+        rx, ry, rz are orientation angles in **degrees**.
 
     scale : [sx, sy, sz], optional
         Scaling factors for x/y/z.
@@ -37,7 +38,8 @@ def transform_robot_coordinates(
 
     Returns
     -------
-    list of transformed coordinates
+    list of transformed coordinates [x, y, z, rx, ry, rz]
+        rx, ry, rz are in **radians** (as required by the robot controller).
     """
 
     # Defaults
@@ -53,6 +55,11 @@ def transform_robot_coordinates(
 
     for coord in coordinates:
         x, y, z, rx, ry, rz = coord
+
+        # Convert input orientation from degrees to radians
+        rx = math.radians(rx)
+        ry = math.radians(ry)
+        rz = math.radians(rz)
 
         # -------------------------------------------------
         # 1. SCALE POSITION
@@ -96,9 +103,9 @@ def transform_robot_coordinates(
         # 6. ROTATE ORIENTATION
         # Simple additive orientation transform
         # -------------------------------------------------
-        rx += rot[0]
-        ry += rot[1]
-        rz += rot[2]
+        rx += rx_rad
+        ry += ry_rad
+        rz += rz_rad
 
         transformed.append([x, y, z, rx, ry, rz])
 

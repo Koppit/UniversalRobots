@@ -13,7 +13,7 @@ if __name__ == "__main__":
     rotation = [0,0,0]
 
 
-    coords = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    coords = [[0.0, 0.0, 100.0, 0.0, 0.0, 0.0],
             [435.0, 285.0, 100.0, 0.0, 0.0, 0.0],
               [-435.0, 285.0, 100.0, 0.0, 0.0, 0.0]]
     transformed_coords = transform_robot_coordinates(coords,scale=scale, translation=translation, rotation=rotation )
