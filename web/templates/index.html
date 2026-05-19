@@ -88,6 +88,7 @@
       justify-content: center;
       background: #0a0c14;
       min-height: 360px;
+      position: relative;
     }
     .feed-img-wrap img {
       max-width: 100%;
@@ -148,11 +149,12 @@
     .btn:active:not(:disabled) { filter: brightness(0.9); }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-    .btn-primary  { background: #4f46e5; color: #fff; }
+    .btn-primary   { background: #4f46e5; color: #fff; }
     .btn-secondary { background: #0e7490; color: #fff; }
-    .btn-success  { background: #16a34a; color: #fff; }
-    .btn-danger   { background: #dc2626; color: #fff; }
-    .btn-neutral  { background: #334155; color: #e2e8f0; }
+    .btn-success   { background: #16a34a; color: #fff; }
+    .btn-danger    { background: #dc2626; color: #fff; }
+    .btn-neutral   { background: #334155; color: #e2e8f0; }
+    .btn-warning   { background: #d97706; color: #fff; }
 
     /* ── Divider ── */
     .ctrl-divider {
@@ -160,6 +162,113 @@
       background: #2d3148;
       align-self: stretch;
       margin: 0 4px;
+    }
+
+    /* ── Robot status chip ── */
+    .robot-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      background: #1e293b;
+      color: #475569;
+    }
+    .robot-chip.connected { background: #14532d22; color: #86efac; border: 1px solid #16a34a44; }
+    .robot-chip.busy      { background: #451a0322; color: #fbbf24; border: 1px solid #d9770644; }
+
+    /* ── Detection list ── */
+    #detection-list {
+      list-style: none;
+      font-size: 12px;
+      color: #94a3b8;
+      max-height: 140px;
+      overflow-y: auto;
+      min-width: 220px;
+    }
+    #detection-list li {
+      padding: 4px 6px;
+      border-bottom: 1px solid #1e293b;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    #detection-list li:last-child { border-bottom: none; }
+    #detection-list li:hover { background: #1e293b; }
+    #detection-list li.selected { background: #1e3a5f; }
+    #detection-list li.selected .det-label { color: #7dd3fc; }
+    .det-label { color: #e2e8f0; font-weight: 500; flex: 1; }
+    .det-pos   { color: #64748b; }
+    .btn-pick-select {
+      padding: 2px 8px;
+      border: 1px solid #334155;
+      border-radius: 4px;
+      background: #1e293b;
+      color: #94a3b8;
+      font-size: 11px;
+      cursor: pointer;
+      font-weight: 600;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .btn-pick-select:hover { background: #263952; color: #7dd3fc; border-color: #3b82f6; }
+    #detection-list li.selected .btn-pick-select {
+      background: #1e3a5f;
+      border-color: #3b82f6;
+      color: #7dd3fc;
+    }
+
+    /* ── Pick & Place summary ── */
+    #pickplace-summary {
+      font-size: 12px;
+      padding: 8px 10px;
+      border-radius: 5px;
+      background: #0f172a;
+      color: #64748b;
+      min-height: 40px;
+      line-height: 1.5;
+    }
+    #pickplace-summary .pp-pick  { color: #7dd3fc; font-weight: 600; }
+    #pickplace-summary .pp-place { color: #fbbf24; font-weight: 600; }
+
+    /* ── Destination marker on analyzed image ── */
+    #capture-img-wrapper {
+      position: relative;
+      display: inline-block;
+      line-height: 0;
+    }
+    #capture-img-wrapper img { display: block; }
+    #capture-img-wrapper.dest-mode img { cursor: crosshair; }
+    #dest-marker {
+      position: absolute;
+      width: 22px; height: 22px;
+      border: 3px solid #f59e0b;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #f59e0b88;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      display: none;
+    }
+    #dest-marker::before {
+      content: '';
+      position: absolute;
+      top: 50%; left: -10px;
+      width: 18px; height: 2px;
+      background: #f59e0b;
+      transform: translateY(-50%);
+    }
+    #dest-marker::after {
+      content: '';
+      position: absolute;
+      top: -10px; left: 50%;
+      width: 2px; height: 18px;
+      background: #f59e0b;
+      transform: translateX(-50%);
     }
 
     /* ── Calibration panel ── */
@@ -246,23 +355,6 @@
       justify-content: space-between;
     }
     #status-text { color: #94a3b8; }
-
-    /* ── Detection list ── */
-    #detection-list {
-      list-style: none;
-      font-size: 12px;
-      color: #94a3b8;
-      max-height: 120px;
-      overflow-y: auto;
-      min-width: 220px;
-    }
-    #detection-list li {
-      padding: 3px 0;
-      border-bottom: 1px solid #1e293b;
-    }
-    #detection-list li:last-child { border-bottom: none; }
-    #detection-list .det-label { color: #e2e8f0; font-weight: 500; }
-    #detection-list .det-pos   { color: #64748b; }
   </style>
 </head>
 <body>
@@ -311,14 +403,17 @@
         </svg>
         Ingen analyse kjørt ennå
       </div>
-      <img id="capture-img" src="" alt="Siste analyse" style="display:none">
+      <div id="capture-img-wrapper">
+        <img id="capture-img" src="" alt="Siste analyse" style="display:none" onclick="captureImgClick(event)">
+        <div id="dest-marker"></div>
+      </div>
     </div>
   </div>
 
   <!-- Controls -->
   <div class="control-panel">
 
-    <!-- Single-shot -->
+    <!-- Single-shot analysis -->
     <div class="ctrl-group">
       <label>Enkeltbilde-analyse</label>
       <button class="btn btn-primary" id="btn-bbox" onclick="analyze('bbox')">
@@ -332,9 +427,38 @@
     <div class="ctrl-divider"></div>
 
     <!-- Detection results -->
-    <div class="ctrl-group" style="flex: 1">
-      <label>Gjenkjente objekter (<span id="det-count">0</span>)</label>
+    <div class="ctrl-group" style="flex:1">
+      <label>Gjenkjente objekter (<span id="det-count">0</span>) — klikk for å velge</label>
       <ul id="detection-list"></ul>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <!-- Robot connection -->
+    <div class="ctrl-group">
+      <label>Robot</label>
+      <div id="robot-chip" class="robot-chip">⬤ Frakoblet</div>
+      <button class="btn btn-success"  id="btn-robot-connect"    onclick="robotConnect()">Koble til robot</button>
+      <button class="btn btn-danger"   id="btn-robot-disconnect" onclick="robotDisconnect()" style="display:none">Koble fra</button>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <!-- Pick & Place -->
+    <div class="ctrl-group" style="flex:1;min-width:260px">
+      <label>Plukk &amp; Plasser</label>
+      <div id="pickplace-summary">Velg et objekt fra listen, klikk deretter destinasjon på bildet.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-neutral"  id="btn-dest-mode" onclick="toggleDestMode()" disabled>
+          Velg destinasjon
+        </button>
+        <button class="btn btn-warning"  id="btn-execute"   onclick="executePick()"    disabled>
+          Kjør ▶
+        </button>
+        <button class="btn btn-neutral"  id="btn-reset-pp"  onclick="resetPickPlace()" style="display:none">
+          Tilbakestill
+        </button>
+      </div>
     </div>
 
   </div>
@@ -375,7 +499,13 @@
 
 <script>
   // ── State ──────────────────────────────────────────────────────────────────
-  let captureVersion = 0;
+  let captureVersion  = 0;
+  let lastDetections  = [];
+  let selectedObject  = null;   // { idx, label, ny, nx }
+  let destinationPoint = null;  // { ny, nx }
+  let destMode        = false;
+  let robotConnected  = false;
+  let robotBusy       = false;
 
   // ── API helpers ───────────────────────────────────────────────────────────
   async function post(url, body = {}) {
@@ -389,6 +519,7 @@
 
   // ── Analyze ───────────────────────────────────────────────────────────────
   async function analyze(mode) {
+    resetPickPlace();
     setButtons(false);
     setStatus('Sender til Gemini…');
     try {
@@ -416,20 +547,165 @@
     ph.style.display  = 'none';
   }
 
-  // ── Detections list ───────────────────────────────────────────────────────
+  // ── Detection list ────────────────────────────────────────────────────────
   function showDetections(dets) {
+    lastDetections = dets;
     const ul = document.getElementById('detection-list');
     document.getElementById('det-count').textContent = dets.length;
     ul.innerHTML = '';
     dets.forEach((d, i) => {
-      const box = d.box_2d || [0,0,0,0];
-      const nx = Math.round((box[1] + box[3]) / 2);
-      const ny = Math.round((box[0] + box[2]) / 2);
+      const box = d.box_2d || [0, 0, 0, 0];
+      const nx  = Math.round((box[1] + box[3]) / 2);
+      const ny  = Math.round((box[0] + box[2]) / 2);
+      const safeLabel = (d.label || '?').replace(/'/g, "\\'");
       const li = document.createElement('li');
-      li.innerHTML = `<span class="det-label">${i+1}. ${d.label || '?'}</span>
-                      <span class="det-pos"> — X=${nx} Y=${ny}</span>`;
+      li.dataset.idx = i;
+      li.innerHTML = `
+        <span class="det-label">${i + 1}. ${d.label || '?'}</span>
+        <span class="det-pos">X=${nx} Y=${ny}</span>
+        <button class="btn-pick-select" onclick="selectObject(${i},'${safeLabel}',${ny},${nx})">Velg</button>`;
       ul.appendChild(li);
     });
+    updatePickPlaceButtons();
+  }
+
+  // ── Object selection ──────────────────────────────────────────────────────
+  function selectObject(idx, label, ny, nx) {
+    selectedObject = { idx, label, ny, nx };
+    document.querySelectorAll('#detection-list li').forEach((li, i) => {
+      li.classList.toggle('selected', i === idx);
+    });
+    updatePickPlaceSummary();
+    updatePickPlaceButtons();
+  }
+
+  // ── Destination mode ──────────────────────────────────────────────────────
+  function toggleDestMode() {
+    destMode = !destMode;
+    const btn = document.getElementById('btn-dest-mode');
+    const wrapper = document.getElementById('capture-img-wrapper');
+    btn.textContent = destMode ? 'Klikk på bildet…' : 'Velg destinasjon';
+    btn.style.background  = destMode ? '#0e7490' : '';
+    btn.style.color       = destMode ? '#fff'    : '';
+    wrapper.classList.toggle('dest-mode', destMode);
+  }
+
+  function captureImgClick(e) {
+    if (!destMode) return;
+    const img  = document.getElementById('capture-img');
+    const rect = img.getBoundingClientRect();
+    const nx = Math.round((e.clientX - rect.left) / rect.width  * 1000);
+    const ny = Math.round((e.clientY - rect.top)  / rect.height * 1000);
+    destinationPoint = { ny, nx };
+
+    // Place crosshair marker at click position
+    const marker = document.getElementById('dest-marker');
+    marker.style.left    = ((e.clientX - rect.left) / rect.width  * 100) + '%';
+    marker.style.top     = ((e.clientY - rect.top)  / rect.height * 100) + '%';
+    marker.style.display = 'block';
+
+    // Exit destination mode
+    destMode = false;
+    const btn = document.getElementById('btn-dest-mode');
+    btn.textContent      = 'Velg destinasjon';
+    btn.style.background = '';
+    btn.style.color      = '';
+    document.getElementById('capture-img-wrapper').classList.remove('dest-mode');
+
+    updatePickPlaceSummary();
+    updatePickPlaceButtons();
+  }
+
+  // ── Pick & Place UI helpers ───────────────────────────────────────────────
+  function updatePickPlaceSummary() {
+    const el = document.getElementById('pickplace-summary');
+    const pickTxt  = selectedObject
+      ? `<span class="pp-pick">Henter: ${selectedObject.label}</span>`
+      : '<span style="color:#475569">Ingen objekt valgt</span>';
+    const placeTxt = destinationPoint
+      ? `<span class="pp-place">Til: X=${destinationPoint.nx} Y=${destinationPoint.ny}</span>`
+      : '<span style="color:#475569">Ingen destinasjon satt</span>';
+    el.innerHTML = pickTxt + ' &nbsp;→&nbsp; ' + placeTxt;
+  }
+
+  function updatePickPlaceButtons() {
+    const hasObj   = selectedObject  !== null;
+    const hasDest  = destinationPoint !== null;
+    const hasDets  = lastDetections.length > 0;
+    document.getElementById('btn-dest-mode').disabled = !hasDets || robotBusy;
+    document.getElementById('btn-execute').disabled   = !(hasObj && hasDest && robotConnected && !robotBusy);
+    document.getElementById('btn-reset-pp').style.display = (hasObj || hasDest) ? '' : 'none';
+  }
+
+  function resetPickPlace() {
+    selectedObject   = null;
+    destinationPoint = null;
+    if (destMode) toggleDestMode();
+    document.querySelectorAll('#detection-list li').forEach(li => li.classList.remove('selected'));
+    document.getElementById('dest-marker').style.display = 'none';
+    document.getElementById('pickplace-summary').innerHTML =
+      'Velg et objekt fra listen, klikk deretter destinasjon på bildet.';
+    document.getElementById('pickplace-summary').style.color = '';
+    updatePickPlaceButtons();
+  }
+
+  // ── Execute pick & place ──────────────────────────────────────────────────
+  async function executePick() {
+    if (!selectedObject || !destinationPoint) return;
+    document.getElementById('btn-execute').disabled = true;
+    setStatus('Sender pick & place til robot…');
+    try {
+      const data = await post('/api/robot/pick_and_place', {
+        pick:  [selectedObject.ny,   selectedObject.nx],
+        place: [destinationPoint.ny, destinationPoint.nx],
+      });
+      if (data.error) {
+        setStatus('Feil: ' + data.error);
+      } else {
+        setStatus('Pick & Place startet…');
+        resetPickPlace();
+      }
+    } catch (e) {
+      setStatus('Nettverksfeil: ' + e.message);
+    }
+  }
+
+  // ── Robot connect / disconnect ────────────────────────────────────────────
+  async function robotConnect() {
+    document.getElementById('btn-robot-connect').disabled = true;
+    setStatus('Kobler til robot…');
+    try {
+      const data = await post('/api/robot/connect');
+      if (data.error) {
+        setStatus('Robot-tilkoblingsfeil: ' + data.error);
+      }
+    } catch (e) {
+      setStatus('Nettverksfeil: ' + e.message);
+    } finally {
+      document.getElementById('btn-robot-connect').disabled = false;
+    }
+  }
+
+  async function robotDisconnect() {
+    await post('/api/robot/disconnect');
+  }
+
+  function updateRobotChip(connected, busy) {
+    const chip = document.getElementById('robot-chip');
+    const btnC = document.getElementById('btn-robot-connect');
+    const btnD = document.getElementById('btn-robot-disconnect');
+    if (connected && busy) {
+      chip.className = 'robot-chip busy';
+      chip.textContent = '⬤ Kjører…';
+    } else if (connected) {
+      chip.className = 'robot-chip connected';
+      chip.textContent = '⬤ Tilkoblet';
+    } else {
+      chip.className = 'robot-chip';
+      chip.textContent = '⬤ Frakoblet';
+    }
+    btnC.style.display = connected ? 'none' : '';
+    btnD.style.display = connected ? ''     : 'none';
   }
 
   // ── UI helpers ────────────────────────────────────────────────────────────
@@ -438,7 +714,7 @@
   }
 
   function setButtons(enabled) {
-    ['btn-bbox','btn-gc'].forEach(id => {
+    ['btn-bbox', 'btn-gc'].forEach(id => {
       document.getElementById(id).disabled = !enabled;
     });
   }
@@ -454,6 +730,10 @@
       const s = await fetch('/api/status').then(r => r.json());
       setStatus(s.msg);
       setDot(s.busy ? 'busy' : 'online');
+      robotConnected = s.robot_connected || false;
+      robotBusy      = s.robot_busy      || false;
+      updateRobotChip(robotConnected, robotBusy);
+      updatePickPlaceButtons();
     } catch (_) {
       setDot('error');
       setStatus('Kan ikke nå serveren.');
@@ -473,10 +753,10 @@
     const data = await post('/api/calibrate/overlay');
     overlayOn = data.overlay;
     const btn = document.getElementById('btn-overlay');
-    btn.textContent = overlayOn ? 'Skjul kalibrering' : 'Vis kalibrering';
-    btn.style.background    = overlayOn ? '#1e3a5f' : '#1e293b';
-    btn.style.color         = overlayOn ? '#7dd3fc' : '#94a3b8';
-    btn.style.borderColor   = overlayOn ? '#3b82f6' : '#334155';
+    btn.textContent      = overlayOn ? 'Skjul kalibrering' : 'Vis kalibrering';
+    btn.style.background = overlayOn ? '#1e3a5f' : '#1e293b';
+    btn.style.color      = overlayOn ? '#7dd3fc' : '#94a3b8';
+    btn.style.borderColor = overlayOn ? '#3b82f6' : '#334155';
   }
 
   // ── Workspace mask toggle ─────────────────────────────────────────────────
@@ -485,10 +765,10 @@
     const data = await post('/api/workspace/toggle');
     maskOn = data.mask;
     const btn = document.getElementById('btn-mask');
-    btn.textContent    = maskOn ? 'Masker PÅ' : 'Masker område';
-    btn.style.background  = maskOn ? '#1c1917' : '#1e293b';
-    btn.style.color       = maskOn ? '#fbbf24' : '#94a3b8';
-    btn.style.borderColor = maskOn ? '#78350f' : '#334155';
+    btn.textContent      = maskOn ? 'Masker PÅ'   : 'Masker område';
+    btn.style.background = maskOn ? '#1c1917'      : '#1e293b';
+    btn.style.color      = maskOn ? '#fbbf24'      : '#94a3b8';
+    btn.style.borderColor = maskOn ? '#78350f'     : '#334155';
   }
 
   // ── Calibration panel ─────────────────────────────────────────────────────
@@ -543,14 +823,14 @@
     try {
       const data = await post('/api/calibrate/run');
       if (data.success) {
-        res.className = 'ok';
+        res.className   = 'ok';
         res.textContent = 'Kalibrering fullfort! Markorer brukt: ' + data.markers_used.join(', ');
       } else {
-        res.className = 'err';
+        res.className   = 'err';
         res.textContent = data.error || 'Kalibrering feilet.';
       }
     } catch (e) {
-      res.className = 'err';
+      res.className   = 'err';
       res.textContent = 'Nettverksfeil: ' + e.message;
     } finally {
       btn.disabled = false;

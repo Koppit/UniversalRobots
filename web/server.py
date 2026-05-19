@@ -47,6 +47,10 @@ _calib_overlay = False
 _mask_workspace = False
 _workspace_hull: np.ndarray | None = None  # cached after calibration, never updated mid-run
 
+_robot = None          # UR3Controller instance (lazy – connected on demand)
+_robot_tools = None    # RobotActionTools instance
+_robot_busy = False
+
 
 # ---------------------------------------------------------------------------
 # Init (called at startup)
@@ -146,11 +150,84 @@ def analyze():
 
 @app.route("/api/status")
 def status():
+    robot_connected = _robot is not None and getattr(_robot, 'connected', False)
     return jsonify({
         "msg": _status_msg,
-        "busy": _busy,
+        "busy": _busy or _robot_busy,
         "has_capture": _last_capture is not None,
+        "robot_connected": robot_connected,
+        "robot_busy": _robot_busy,
     })
+
+
+# ---------------------------------------------------------------------------
+# Robot endpoints
+# ---------------------------------------------------------------------------
+@app.route("/api/robot/connect", methods=["POST"])
+def robot_connect():
+    global _robot, _robot_tools, _status_msg
+    if _robot is not None and getattr(_robot, 'connected', False):
+        return jsonify({"connected": True})
+    try:
+        from robot.ur3_controller import UR3Controller
+        from tools.robot_tools import RobotActionTools
+        robot = UR3Controller()
+        robot.connect()
+        _robot = robot
+        _robot_tools = RobotActionTools(robot, _homography)
+        _status_msg = "Robot tilkoblet."
+        return jsonify({"connected": True})
+    except Exception as exc:
+        _status_msg = f"Tilkoblingsfeil: {exc}"
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/robot/disconnect", methods=["POST"])
+def robot_disconnect():
+    global _robot, _robot_tools, _status_msg
+    if _robot is not None:
+        try:
+            _robot.disconnect()
+        except Exception:
+            pass
+        _robot = None
+        _robot_tools = None
+    _status_msg = "Robot frakoblet."
+    return jsonify({"connected": False})
+
+
+@app.route("/api/robot/pick_and_place", methods=["POST"])
+def robot_pick_and_place():
+    global _robot_busy, _status_msg
+    if _robot_tools is None:
+        return jsonify({"error": "Robot ikke tilkoblet."}), 400
+    if not _homography.is_calibrated():
+        return jsonify({"error": "Homografi ikke kalibrert – kjør ArUco kalibrering først."}), 400
+    if _robot_busy:
+        return jsonify({"error": "Robot er opptatt."}), 409
+
+    data = request.json or {}
+    pick = data.get("pick")    # [ny, nx]
+    place = data.get("place")  # [ny, nx]
+    if not pick or not place or len(pick) != 2 or len(place) != 2:
+        return jsonify({"error": "Ugyldig payload – pick og place ([ny, nx]) kreves."}), 400
+
+    def _run():
+        global _robot_busy, _status_msg
+        _robot_busy = True
+        try:
+            _status_msg = "Plukker objekt…"
+            _robot_tools.pick_object_at(pick[0], pick[1])
+            _status_msg = "Plasserer objekt…"
+            _robot_tools.place_object_at(place[0], place[1])
+            _status_msg = "Pick & Place fullfort."
+        except Exception as exc:
+            _status_msg = f"Robot-feil: {exc}"
+        finally:
+            _robot_busy = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"status": "started"})
 
 
 # ---------------------------------------------------------------------------
