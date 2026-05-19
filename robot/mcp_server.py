@@ -7,42 +7,42 @@ from fastmcp import FastMCP
 from ur3_controller import UR3Controller
 
 
-async def main():
-    # Start the HTTP transport so agents can call the registered tool.
-    await mcp.run_async(transport="http", port=8000)
+
 
 if __name__ == "__main__":
 
+    # Singleton robot instance — connect/disconnect tools manage its lifecycle.
+    robot = UR3Controller(ip="192.168.0.10")
+
     mcp = FastMCP("UR3 Robot Controller")
 
-    # Singleton robot instance — connect/disconnect tools manage its lifecycle.
-    robot = UR3Controller()
+    try:
+        robot.connect()
 
 
-    # ---------------------------------------------------------------------------
-    # Connection
-    # ---------------------------------------------------------------------------
+        # ---------------------------------------------------------------------------
+        # Motion
+        # ---------------------------------------------------------------------------
 
-    mcp.add_tool(robot.connect)
-    mcp.add_tool(robot.disconnect)
-
-
-    # ---------------------------------------------------------------------------
-    # Motion
-    # ---------------------------------------------------------------------------
-
-    mcp.add_tool(robot.move_to_xyz_j)
+        mcp.add_tool(robot.move_to_xyz_j)
 
 
-    # ---------------------------------------------------------------------------
-    # Gripper
-    # ---------------------------------------------------------------------------
+        # ---------------------------------------------------------------------------
+        # Gripper
+        # ---------------------------------------------------------------------------
 
-    mcp.add_tool(robot.gripper_activate)
-    mcp.add_tool(robot.grab_object)
-    mcp.add_tool(robot.release_object)
-
-
+        mcp.add_tool(robot.gripper_activate)
+        mcp.add_tool(robot.grab_object)
+        mcp.add_tool(robot.release_object)
 
 
-    asyncio.run(main())
+        # ---------------------------------------------------------------------------
+        # Start MCP Server
+        # ---------------------------------------------------------------------------
+
+
+        mcp.run(transport="http", port=8001)
+
+    finally:
+
+        robot.disconnect()
