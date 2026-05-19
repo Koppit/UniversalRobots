@@ -711,6 +711,9 @@
       const data = await post('/api/robot/connect');
       if (data.error) {
         setStatus('Robot-tilkoblingsfeil: ' + data.error);
+      } else {
+        setStatus('Robot tilkoblet.');
+        await pollStatus();
       }
     } catch (e) {
       setStatus('Nettverksfeil: ' + e.message);
@@ -721,6 +724,7 @@
 
   async function robotDisconnect() {
     await post('/api/robot/disconnect');
+    await pollStatus();
   }
 
   function updateRobotChip(connected, busy) {
