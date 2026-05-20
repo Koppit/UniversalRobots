@@ -1342,21 +1342,34 @@
   // ── Speech / AI assistant ─────────────────────────────────────────────────
   let speechRec = null;
   let speechListening = false;
+  let mediaRec = null;
+  let mediaChunks = [];
 
   function setSpeechText(text) {
     const el = document.getElementById('speech-text');
     if (el) el.textContent = text;
   }
 
+  function supportedAudioMimeType() {
+    const types = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/ogg',
+      'audio/mp4',
+    ];
+    return types.find(type => MediaRecorder.isTypeSupported(type)) || '';
+  }
+
   function toggleSpeech() {
     if (speechListening) {
       if (speechRec) speechRec.stop();
+      if (mediaRec && mediaRec.state === 'recording') mediaRec.stop();
       return;
     }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
-      setSpeechText('Nettleseren støtter ikke talegjenkjenning.');
-      setStatus('Nettleseren støtter ikke talegjenkjenning (prøv Chrome/Edge).');
+      toggleRecordedSpeech();
       return;
     }
     speechRec = new SR();
@@ -1388,6 +1401,77 @@
       speechRec.start();
     } catch (e) {
       setSpeechText('Kunne ikke starte mikrofon: ' + e.message);
+    }
+  }
+
+  async function toggleRecordedSpeech() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+      setSpeechText('Nettleseren støtter ikke mikrofonopptak. Prøv Chrome/Edge eller åpne via localhost.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = supportedAudioMimeType();
+      mediaChunks = [];
+      mediaRec = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+
+      mediaRec.ondataavailable = e => {
+        if (e.data && e.data.size > 0) mediaChunks.push(e.data);
+      };
+      mediaRec.onstart = () => {
+        speechListening = true;
+        document.getElementById('btn-mic').classList.add('listening');
+        setSpeechText('Lytter… trykk mikrofonen igjen for å stoppe.');
+      };
+      mediaRec.onstop = async () => {
+        speechListening = false;
+        document.getElementById('btn-mic').classList.remove('listening');
+        stream.getTracks().forEach(track => track.stop());
+        await transcribeRecording(mimeType || mediaRec.mimeType || 'audio/webm');
+      };
+      mediaRec.onerror = e => {
+        speechListening = false;
+        document.getElementById('btn-mic').classList.remove('listening');
+        stream.getTracks().forEach(track => track.stop());
+        setSpeechText('Opptaksfeil: ' + (e.error && e.error.message ? e.error.message : 'ukjent feil'));
+      };
+
+      mediaRec.start();
+    } catch (e) {
+      speechListening = false;
+      document.getElementById('btn-mic').classList.remove('listening');
+      setSpeechText('Mikrofonfeil: ' + e.message);
+    }
+  }
+
+  async function transcribeRecording(mimeType) {
+    if (!mediaChunks.length) {
+      setSpeechText('Ingen lyd tatt opp.');
+      return;
+    }
+    setSpeechText('Tolker tale…');
+    const blob = new Blob(mediaChunks, { type: mimeType });
+    const form = new FormData();
+    const ext = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+    form.append('audio', blob, 'command.' + ext);
+
+    try {
+      const r = await fetch('/api/assistant/transcribe', {
+        method: 'POST',
+        body: form,
+      });
+      const data = await r.json();
+      if (data.error) {
+        setSpeechText('Feil: ' + data.error);
+        return;
+      }
+      const text = (data.text || '').trim();
+      document.getElementById('assistant-input').value = text;
+      setSpeechText('Hørte: ' + text);
+      sendAssistantPrompt();
+    } catch (e) {
+      setSpeechText('Nettverksfeil: ' + e.message);
     }
   }
 

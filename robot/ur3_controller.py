@@ -12,6 +12,14 @@ class RobotiqGripper(object):
     def __init__(self, rtde_c): 
         self.rtde_c = rtde_c
 
+    @staticmethod
+    def _clamp_norm(value, default=3):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = default
+        return max(0, min(100, value))
+
     def call(self, script_name, script_function):
         return self.rtde_c.sendCustomScriptFunction(
             "ROBOTIQ_" + script_name,
@@ -24,9 +32,11 @@ class RobotiqGripper(object):
         return ret
 
     def set_speed(self, speed):
+        speed = self._clamp_norm(speed)
         return self.call("SET_SPEED", f"rq_set_speed_norm({speed})")
 
     def set_force(self, force):
+        force = self._clamp_norm(force, default=50)
         return self.call("SET_FORCE", f"rq_set_force_norm({force})")
 
     def move(self, pos_in_mm):
@@ -263,6 +273,7 @@ class UR3Controller:
             self.rtde_c = rtde_control.RTDEControlInterface(self.ip)
             self.rtde_r = RTDEReceiveInterface(self.ip)
             self.gripper = RobotiqGripper(self.rtde_c)
+            self.gripper.set_speed(os.environ.get("GRIPPER_SPEED", 3))
             self.connected = True
             print("[UR3] Tilkoblet!")
             return True
@@ -305,7 +316,7 @@ class UR3Controller:
             self.connected = False
             return None
 
-    def move_to_xyz(self, coords, speed=0.10, acceleration=0.25):
+    def move_to_xyz(self, coords, speed=3, acceleration=2):
         """Flytter armen lineært (moveL) til spesifikke X,Y,Z i meter uten å endre rotasjonen.
 
         If a zero pose has been set, coords are treated as relative to that frame.
@@ -323,7 +334,7 @@ class UR3Controller:
             self.connected = False
             raise RuntimeError(f"Robot mistet tilkobling: {e}") from e
 
-    def move_to_xyz_j(self, coords, speed=0.5, acceleration=0.5, safe_z: float = None):
+    def move_to_xyz_j(self, coords, speed=3, acceleration=2, safe_z: float = None):
         """Moves the arm using MOVEJ (joint-space interpolation via inverse kinematics).
 
         Compared to moveL, joint-space motion follows arc paths that avoid
@@ -452,6 +463,7 @@ class UR3Controller:
     def gripper_activate(self):
         if self.gripper:
             self.gripper.activate()
+            self.gripper.set_speed(os.environ.get("GRIPPER_SPEED", 3))
             return True
         else:
             return False

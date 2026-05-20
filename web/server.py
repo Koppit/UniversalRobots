@@ -134,6 +134,9 @@ def _start_robot_connect() -> tuple[dict, int]:
             _log("info", "Robot i hjemposisjon. Aktiverer griper…")
             _status_msg = "Aktiverer griper (5 s)…"
             robot.gripper.activate()
+            gripper_speed = os.environ.get("GRIPPER_SPEED", 3)
+            robot.gripper.set_speed(gripper_speed)
+            _log("info", f"Griperhastighet satt til {gripper_speed} (0-100).")
             robot.release_object()
             _robot = robot
             _robot_tools = robot_tools
@@ -629,6 +632,48 @@ def assistant_command():
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"status": "started", "command": text})
+
+
+@app.route("/api/assistant/transcribe", methods=["POST"])
+def assistant_transcribe():
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return jsonify({"error": "GEMINI_API_KEY mangler."}), 500
+
+    audio = request.files.get("audio")
+    if audio is None:
+        return jsonify({"error": "Ingen lyd mottatt."}), 400
+
+    audio_bytes = audio.read()
+    if not audio_bytes:
+        return jsonify({"error": "Tom lydfil mottatt."}), 400
+    if len(audio_bytes) > 8 * 1024 * 1024:
+        return jsonify({"error": "Lydfilen er for stor."}), 413
+
+    mime_type = audio.mimetype or "audio/webm"
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key)
+        model = os.environ.get("GEMINI_TRANSCRIBE_MODEL", "gemini-2.5-flash")
+        response = client.models.generate_content(
+            model=model,
+            contents=[
+                types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                "Transcribe this Norwegian or English robot command. Return only the spoken text.",
+            ],
+            config=types.GenerateContentConfig(
+                temperature=0.0,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        text = (response.text or "").strip()
+        if not text:
+            return jsonify({"error": "Kunne ikke tolke tale."}), 422
+        return jsonify({"text": text})
+    except Exception as exc:
+        return jsonify({"error": f"Transkripsjonsfeil: {exc}"}), 500
 
 
 # ---------------------------------------------------------------------------
