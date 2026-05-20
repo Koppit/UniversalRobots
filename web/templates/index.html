@@ -553,7 +553,7 @@
     <div class="ctrl-group">
       <label>Enkeltbilde-analyse</label>
       <button class="btn btn-primary" id="btn-bbox" onclick="analyze('bbox')">
-        Bounding Boxes
+        Update
       </button>
       <button class="btn btn-secondary" id="btn-gc" onclick="analyze('grabcut')">
         Kontur-segmentering (GrabCut)
@@ -741,6 +741,9 @@
   let destinationPoint = null;  // { ny, nx }
   let destMode        = false;
   let autoRunPending  = false;
+  let refreshAfterRobotRun = false;
+  let robotRunSeenBusy = false;
+  let autoRefreshInProgress = false;
   let robotConnected  = false;
   let robotBusy       = false;
   let verifyMode     = false;
@@ -780,7 +783,7 @@
     try {
       const data = await post('/api/analyze', { mode });
       if (data.error) { setStatus('Feil: ' + data.error); return; }
-      const label = mode === 'grabcut' ? 'GrabCut' : 'Bounding Boxes';
+      const label = mode === 'grabcut' ? 'GrabCut' : 'Update';
       document.getElementById('mode-badge').textContent = label;
       refreshCapture();
       showDetections(data.detections || []);
@@ -1020,6 +1023,8 @@
       if (data.error) {
         setStatus('Feil: ' + data.error);
       } else {
+        refreshAfterRobotRun = true;
+        robotRunSeenBusy = false;
         setStatus('Pick & Place startet…');
         resetPickPlace();
       }
@@ -1171,17 +1176,36 @@
   }
 
   // ── Status polling ────────────────────────────────────────────────────────
+  async function refreshAnalysisAfterRobotRun() {
+    if (autoRefreshInProgress) return;
+    autoRefreshInProgress = true;
+    refreshAfterRobotRun = false;
+    robotRunSeenBusy = false;
+    try {
+      await analyze('bbox');
+    } finally {
+      autoRefreshInProgress = false;
+    }
+  }
+
   async function pollStatus() {
     try {
       const s = await fetch('/api/status').then(r => r.json());
+      const wasRobotBusy = robotBusy;
       setStatus(s.msg);
       setDot(s.busy ? 'busy' : 'online');
       robotConnected = s.robot_connected || false;
       robotBusy      = s.robot_busy      || false;
+      if (refreshAfterRobotRun && robotBusy) {
+        robotRunSeenBusy = true;
+      }
       updateRobotChip(robotConnected, robotBusy);
       updatePickPlaceButtons();
       updateMicButton();
       updateAssistantButtons();
+      if (refreshAfterRobotRun && robotRunSeenBusy && wasRobotBusy && !robotBusy && robotConnected) {
+        refreshAnalysisAfterRobotRun();
+      }
     } catch (_) {
       setDot('error');
       setStatus('Kan ikke nå serveren.');
