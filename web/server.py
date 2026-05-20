@@ -16,6 +16,7 @@ import logging
 from collections import deque
 from datetime import datetime
 from pathlib import Path
+import json
 import cv2
 import numpy as np
 from flask import Flask, Response, render_template, jsonify, request
@@ -34,12 +35,31 @@ from robot.transform import transform_robot_coordinates  # noqa: E402
 
 # mm → m, inverter y- og z-akse (samme som test_robot.py)
 MM_SCALE = [0.001, -0.001, -0.001]
+WORKSPACE_ROTATION_CONFIG_PATH = Path(__file__).parent.parent / "workspace_rotation.json"
+
+
+def _load_workspace_rotation():
+    if not WORKSPACE_ROTATION_CONFIG_PATH.exists():
+        return [0.0, 0.0, 0.0]
+    try:
+        config = json.loads(WORKSPACE_ROTATION_CONFIG_PATH.read_text())
+        return [
+            float(config.get("WORKSPACE_ROTATION_X_DEG", 0.0)),
+            float(config.get("WORKSPACE_ROTATION_Y_DEG", 0.0)),
+            float(config.get("WORKSPACE_ROTATION_Z_DEG", 0.0)),
+        ]
+    except Exception:
+        return [0.0, 0.0, 0.0]
+
+WORKSPACE_ROTATION = _load_workspace_rotation()
 
 
 def _mm_to_robot(x, y, z, rx_deg=0.0, ry_deg=0.0, rz_deg=0.0):
     """Konverterer fra mm/grader (brukerfelt) til meter/radianer (robot)."""
     result = transform_robot_coordinates(
-        [[x, y, z, rx_deg, ry_deg, rz_deg]], scale=MM_SCALE
+        [[x, y, z, rx_deg, ry_deg, rz_deg]],
+        scale=MM_SCALE,
+        rotation=WORKSPACE_ROTATION,
     )
     return result[0]
 
