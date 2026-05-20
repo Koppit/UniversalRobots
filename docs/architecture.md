@@ -16,8 +16,10 @@ ai/
 
 robot/
   ur3_controller.py     UR3Controller + RobotiqGripper — RTDE connection, moveL/moveJ, gripper
+  robotiq_preamble.py   ROBOTIQ_PREAMBLE URScript constant — imported by ur3_controller
   transform.py          6-axis coordinate transform (scale, rotate, translate)
   set_robot_zero.py     One-time script: capture current TCP pose as work area centre
+  mcp_server.py         Early standalone MCP server (port 8001, direct robot) — superseded by ai/mcp_server.py
 
 tools/
   robot_tools.py        RobotActionTools — bridges Gemini normalised coords to robot actions

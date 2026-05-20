@@ -8,7 +8,8 @@
       "Bash(Get-ChildItem -Path \"e:\\\\git\\\\UniversalRobots\" -Recurse -Force)",
       "Bash(Select-Object -Property FullName)",
       "Bash(Sort-Object FullName)",
-      "Bash(Format-Table -AutoSize)"
+      "Bash(Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem -Path \"d:\\\\git\\\\2026_Samling_2_repo\\\\UniversalRobots\" -Recurse -Force | Where-Object {$_.FullName -notmatch '\\(\\\\.venv|__pycache__|\\\\.git|node_modules\\)'} | ForEach-Object {$_.FullName.Replace\\(\"d:\\\\git\\\\2026_Samling_2_repo\\\\UniversalRobots\\\\\", \"\"\\)} | Sort-Object)"
     ]
   }
 }
