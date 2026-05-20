@@ -791,20 +791,22 @@
         : `${nx} / ${ny}`;
       const rxArg = d.rx_mm !== undefined ? d.rx_mm : 'null';
       const ryArg = d.ry_mm !== undefined ? d.ry_mm : 'null';
+      const angleArg = d.angle_deg !== undefined ? d.angle_deg : 'null';
+      const angleText = d.angle_deg !== undefined ? ` RZ=${d.angle_deg}°` : '';
       const li = document.createElement('li');
       li.dataset.idx = i;
       li.innerHTML = `
         <span class="det-label">${i + 1}. ${d.label || '?'}</span>
-        <span class="det-pos">${posText}</span>
-        <button class="btn-pick-select" onclick="selectObject(${i},'${safeLabel}',${ny},${nx},${rxArg},${ryArg})">Velg</button>`;
+        <span class="det-pos">${posText}${angleText}</span>
+        <button class="btn-pick-select" onclick="selectObject(${i},'${safeLabel}',${ny},${nx},${rxArg},${ryArg},${angleArg})">Velg</button>`;
       ul.appendChild(li);
     });
     updatePickPlaceButtons();
   }
 
   // ── Object selection ──────────────────────────────────────────────────────
-  function selectObject(idx, label, ny, nx, rx_mm, ry_mm) {
-    selectedObject = { idx, label, ny, nx, rx_mm, ry_mm };
+  function selectObject(idx, label, ny, nx, rx_mm, ry_mm, angle_deg) {
+    selectedObject = { idx, label, ny, nx, rx_mm, ry_mm, angle_deg };
     document.querySelectorAll('#detection-list li').forEach((li, i) => {
       li.classList.toggle('selected', i === idx);
     });
@@ -865,8 +867,11 @@
     const pickCoord = selectedObject && selectedObject.rx_mm != null
       ? ` (X=${selectedObject.rx_mm}mm, Y=${selectedObject.ry_mm}mm, Z=100→10mm)`
       : selectedObject ? ` (grid ${selectedObject.nx}/${selectedObject.ny})` : '';
+    const pickAngle = selectedObject && selectedObject.angle_deg != null
+      ? ` RZ=${selectedObject.angle_deg}°`
+      : '';
     const pickTxt = selectedObject
-      ? `<span class="pp-pick">Henter: ${selectedObject.label}${pickCoord}</span>`
+      ? `<span class="pp-pick">Henter: ${selectedObject.label}${pickCoord}${pickAngle}</span>`
       : '<span style="color:#475569">Ingen objekt valgt</span>';
     const placeCoord = destinationPoint && destinationPoint.rx_mm != null
       ? `X=${destinationPoint.rx_mm}mm, Y=${destinationPoint.ry_mm}mm, Z=100→10mm`
@@ -907,6 +912,7 @@
       const data = await post('/api/robot/pick_and_place', {
         pick:  [selectedObject.ny,   selectedObject.nx],
         place: [destinationPoint.ny, destinationPoint.nx],
+        pick_angle_deg: selectedObject.angle_deg,
       });
       if (data.error) {
         setStatus('Feil: ' + data.error);

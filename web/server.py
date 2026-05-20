@@ -29,7 +29,7 @@ from flask import Flask, Response, render_template, jsonify, request
 from vision.camera import BRIOCamera  # noqa: E402
 from vision.homography import GEMINI_GRID, HomographyConverter  # noqa: E402
 from vision.aruco_calibrator import ArucoCalibrator  # noqa: E402
-from vision.annotation import draw_boxes, draw_contours  # noqa: E402
+from vision.annotation import draw_boxes, draw_contours, estimate_object_angle  # noqa: E402
 from ai.detection import make_client, detect_objects  # noqa: E402
 from robot.transform import transform_robot_coordinates  # noqa: E402
 
@@ -261,6 +261,12 @@ def analyze():
     _status_msg = f"Analyserer ({label})…"
     try:
         detections = detect_objects(_client, gemini_frame)
+        for det in detections:
+            box = det.get("box_2d")
+            if box and len(box) == 4:
+                angle = estimate_object_angle(gemini_frame, box)
+                if angle is not None:
+                    det["angle_deg"] = angle
         annotated = draw_contours(gemini_frame, detections) if mode == "grabcut" else draw_boxes(gemini_frame, detections)
         _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
         with _last_capture_lock:
@@ -509,6 +515,11 @@ def robot_pick_and_place():
     place = data.get("place")  # [ny, nx]
     if not pick or not place or len(pick) != 2 or len(place) != 2:
         return jsonify({"error": "Ugyldig payload – pick og place ([ny, nx]) kreves."}), 400
+    pick_angle_deg = data.get("pick_angle_deg")
+    try:
+        pick_angle_deg = float(pick_angle_deg) if pick_angle_deg is not None else None
+    except (TypeError, ValueError):
+        pick_angle_deg = None
 
     def _run():
         global _robot_busy, _status_msg
@@ -519,10 +530,12 @@ def robot_pick_and_place():
                 drx, dry = _homography.gemini_to_robot(place[0], place[1])
                 _log("info", f"Hente-koordinater: ny={pick[0]} nx={pick[1]} → X={prx*1000:.0f}mm Y={pry*1000:.0f}mm")
                 _log("info", f"Plassere-koordinater: ny={place[0]} nx={place[1]} → X={drx*1000:.0f}mm Y={dry*1000:.0f}mm")
+                if pick_angle_deg is not None:
+                    _log("info", f"Estimert gripevinkel: RZ={pick_angle_deg:.1f}°")
             except Exception as e:
                 _log("warning", f"Kan ikke forhåndsvise koordinater: {e}")
             _status_msg = "Plukker objekt…"
-            _robot_tools.pick_object_at(pick[0], pick[1])
+            _robot_tools.pick_object_at(pick[0], pick[1], pick_angle_deg)
             _status_msg = "Plasserer objekt…"
             _robot_tools.place_object_at(place[0], place[1])
             _status_msg = "Pick & Place fullfort."

@@ -42,6 +42,33 @@ def grabcut_mask(frame: np.ndarray, box: list) -> np.ndarray | None:
     return np.where((mask == 2) | (mask == 0), 0, 1).astype(np.uint8) * 255
 
 
+def estimate_object_angle(frame: np.ndarray, box: list) -> float | None:
+    """Estimate object long-axis angle from its detection box."""
+    seg = grabcut_mask(frame, box)
+    if seg is None:
+        return None
+
+    contours, _ = cv2.findContours(seg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+
+    contour = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(contour) < 40:
+        return None
+
+    (_, _), (rw, rh), angle = cv2.minAreaRect(contour)
+    if rw <= 1 or rh <= 1:
+        return None
+    if rw < rh:
+        angle += 90.0
+
+    while angle < -90.0:
+        angle += 180.0
+    while angle >= 90.0:
+        angle -= 180.0
+    return round(float(angle), 1)
+
+
 def draw_boxes(frame: np.ndarray, detections: list) -> np.ndarray:
     h, w = frame.shape[:2]
     out = frame.copy()
