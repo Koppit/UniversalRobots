@@ -8,16 +8,43 @@ or
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(__file__))
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from dotenv import load_dotenv
+load_dotenv(os.path.join(_ROOT, ".env"))
 
 from fastmcp import FastMCP
 from ur3_controller import UR3Controller
 from transform import transform_robot_coordinates
 
+from vision.camera import BRIOCamera
+from vision.homography import HomographyConverter
+from ai.detection import make_client, detect_objects as _gemini_detect
+
 mcp = FastMCP("UR3 Robot Controller")
 
 # Singleton robot instance — connect/disconnect tools manage its lifecycle.
 _robot = UR3Controller()
+
+# Vision state
+_cam = BRIOCamera()
+_cam_open = False
+_gemini = make_client()
+_homography = HomographyConverter()
+_homography.load()
+
+
+def _ensure_camera() -> str | None:
+    """Open camera if not already open. Returns error string or None."""
+    global _cam_open
+    if not _cam_open:
+        _cam_open = _cam.open()
+        if not _cam_open:
+            return "Kamera ikke funnet – koble til BRIO og prøv igjen."
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +65,99 @@ def disconnect() -> str:
     """Disconnect from the UR3 robot."""
     _robot.disconnect()
     return "Disconnected"
+
+
+# ---------------------------------------------------------------------------
+# Vision / Gemini
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def detect_objects() -> list[dict]:
+    """Capture a frame from the BRIO camera and detect objects using Gemini.
+
+    Returns a list of detected objects with keys:
+      - label (str): object name, e.g. "red cube"
+      - ny (int): Y centre, 0-1000 normalised image space
+      - nx (int): X centre, 0-1000 normalised image space
+      - rx (float | None): robot X coordinate in meters (if homography calibrated)
+      - ry (float | None): robot Y coordinate in meters (if homography calibrated)
+    """
+    if _gemini is None:
+        return [{"error": "GEMINI_API_KEY ikke satt i .env"}]
+    err = _ensure_camera()
+    if err:
+        return [{"error": err}]
+    frame = _cam.capture_frame()
+    if frame is None:
+        return [{"error": "Kamera returnerte ingen frame."}]
+    raw = _gemini_detect(_gemini, frame)
+    results = []
+    for d in raw:
+        box = d.get("box_2d", [0, 0, 0, 0])
+        ny = round((box[0] + box[2]) / 2)
+        nx = round((box[1] + box[3]) / 2)
+        entry = {"label": d.get("label", "ukjent"), "ny": ny, "nx": nx,
+                 "rx": None, "ry": None}
+        if _homography.is_calibrated():
+            try:
+                rx, ry = _homography.convert_gemini_to_robot(ny, nx)
+                entry["rx"] = round(rx, 4)
+                entry["ry"] = round(ry, 4)
+            except Exception:
+                pass
+        results.append(entry)
+    return results
+
+
+@mcp.tool()
+def pick_detected_object(label: str, place_rx: float, place_ry: float,
+                         place_rz: float = 0.05) -> str:
+    """Detect objects with Gemini, pick the one matching label, and place it.
+
+    Args:
+      label:     Substring match against detected object labels (case-insensitive).
+      place_rx:  Place destination X in robot coordinates (meters).
+      place_ry:  Place destination Y in robot coordinates (meters).
+      place_rz:  Place destination Z (meters, default 0.05 = 5 cm above table).
+
+    Requires: robot connected, homography calibrated, GEMINI_API_KEY set.
+    """
+    if not _robot.connected:
+        return "Robot ikke tilkoblet – kall connect() først."
+    if not _homography.is_calibrated():
+        return "Homografi ikke kalibrert – kjør kalibrering i webgrensesnittet først."
+
+    objects = detect_objects()
+    if objects and "error" in objects[0]:
+        return f"Deteksjonsfeil: {objects[0]['error']}"
+    if not objects:
+        return "Ingen objekter funnet."
+
+    label_lower = label.lower()
+    match = next(
+        (o for o in objects
+         if label_lower in o["label"].lower() or o["label"].lower() in label_lower),
+        None,
+    )
+    if match is None:
+        found = [o["label"] for o in objects]
+        return f"Fant ikke '{label}'. Detekterte: {found}"
+
+    if match["rx"] is None:
+        return "Homografi ikke kalibrert, kan ikke beregne robot-koordinater."
+
+    from robot.ur3_controller import UR3Controller as _C  # noqa: used for type context
+    safe = 0.15
+    _robot.move_to_xyz_j([match["rx"], match["ry"], safe, 0, 0, 0])
+    _robot.move_to_xyz_j([match["rx"], match["ry"], 0.01, 0, 0, 0])
+    _robot.grab_object()
+    _robot.move_to_xyz_j([match["rx"], match["ry"], safe, 0, 0, 0])
+    _robot.move_to_xyz_j([place_rx, place_ry, safe, 0, 0, 0])
+    _robot.move_to_xyz_j([place_rx, place_ry, place_rz, 0, 0, 0])
+    _robot.release_object()
+    _robot.move_to_xyz_j([place_rx, place_ry, safe, 0, 0, 0])
+    return f"Plukket '{match['label']}' fra ({match['rx']}, {match['ry']}) og plasserte ved ({place_rx}, {place_ry})."
+
 
 '''
 # ---------------------------------------------------------------------------
@@ -71,13 +191,13 @@ def move_to_xyz(
     speed: float = 0.10,
     acceleration: float = 0.25,
 ) -> str:
-    """Move linearly (moveL) to the given TCP pose.
+    """Move (moveJ IK) to the given TCP pose.
 
     Coordinates are relative to the zero pose if one is set, otherwise absolute.
     x/y/z in meters; rx/ry/rz in radians.
     """
-    _robot.move_to_xyz([x, y, z, rx, ry, rz], speed=speed, acceleration=acceleration)
-    return f"moveL done: [{x:.3f}, {y:.3f}, {z:.3f}]"
+    _robot.move_to_xyz_j([x, y, z, rx, ry, rz], speed=speed, acceleration=acceleration)
+    return f"moveJ done: [{x:.3f}, {y:.3f}, {z:.3f}]"
 '''
 
 @mcp.tool()

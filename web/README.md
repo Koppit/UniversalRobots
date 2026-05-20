@@ -1,112 +1,130 @@
 # web/
 
-Flask-basert webserver for robot vision-kontroll. Gir live kamerafeed, Gemini-gjenkjenning og ArUco-kalibrering via nettleser.
+Flask web server for robot vision control. Provides a live camera feed, Gemini object detection, ArUco calibration, and robot pick-and-place via a browser UI.
 
-## Kjøring
+## Running
 
-```
+```bash
 .venv\Scripts\python web\server.py
 ```
 
-Åpne nettleser: http://localhost:5000
+Open [http://localhost:5000](http://localhost:5000).
 
-## Filstruktur
+---
+
+## UI tabs
+
+**Operasjon**
+- Live camera feed (MJPEG stream)
+- Analyze button — sends current frame to Gemini, lists detected objects with robot XY coordinates
+- Object selection and destination click for pick-and-place
+- Robot connection, manual jog, emergency stop
+
+**Kalibrering**
+- ArUco marker status (which of the four markers the camera currently sees)
+- **Kalibrer nå** — runs `HomographyConverter.calibrate_aruco()`, saves `homography_matrix.json`
+- **Verifiser kalibrering** — click in live feed to read robot XY; optionally move robot to that point
+- Camera preview showing ArUco detections
+
+**Debug**
+- Scrolling log console (server-side messages, coordinate logs, errors)
+
+---
+
+## File structure
 
 ```
 web/
-├── server.py          # Flask-applikasjon og alle API-endepunkter
+├── server.py          # Flask application and all API endpoints
 └── templates/
-    └── index.html     # Enkeltside-UI (vanilla HTML/CSS/JS, ingen build-steg)
+    └── index.html     # Single-page UI (vanilla HTML/CSS/JS, no build step)
 ```
 
-## Avhengigheter
+---
 
-### Prosjektmoduler server.py importerer
+## Dependencies
 
-| Modul | Fil | Hva som brukes |
-|-------|-----|----------------|
-| `ai.detection` | `ai/detection.py` | `make_client`, `detect_objects` — Gemini-klient og bildeanalyse |
-| `vision.camera` | `vision/camera.py` | `BRIOCamera` — kameraopptak i bakgrunnstråd |
-| `vision.homography` | `vision/homography.py` | `HomographyConverter` — piksel → robot XY-konvertering |
-| `vision.aruco_calibrator` | `vision/aruco_calibrator.py` | `ArucoCalibrator` — ArUco-deteksjon og homografi-bygging |
-| `vision.annotation` | `vision/annotation.py` | `draw_boxes`, `draw_contours` — OpenCV-annotasjon av deteksjoner |
+### Project modules
 
-### Konfigurasjonsfiler
+| Module | File | Used for |
+|--------|------|----------|
+| `ai.detection` | `ai/detection.py` | `make_client`, `detect_objects` — Gemini client and image analysis |
+| `vision.camera` | `vision/camera.py` | `BRIOCamera` — background-threaded camera capture |
+| `vision.homography` | `vision/homography.py` | `HomographyConverter` — pixel → robot XY mapping |
+| `vision.aruco_calibrator` | `vision/aruco_calibrator.py` | `ArucoCalibrator` — marker detection and homography |
+| `vision.annotation` | `vision/annotation.py` | `draw_boxes`, `draw_contours` — frame annotation |
+| `robot.ur3_controller` | `robot/ur3_controller.py` | `UR3Controller`, `RobotiqGripper` |
+| `robot.transform` | `robot/transform.py` | `transform_robot_coordinates` — mm/deg → m/rad |
+| `tools.robot_tools` | `tools/robot_tools.py` | `RobotActionTools` — pick/place sequences |
 
-| Fil | Beskrivelse |
-|-----|-------------|
-| `aruco_config.json` | Markør-ID → robot XY (meter), markørstørrelse og ArUco-ordbok |
-| `homography_matrix.json` | Lagret homografi-matrise H (skrives av kalibrering, leses ved oppstart) |
+### Config files read at startup
+
+| File | Purpose |
+|------|---------|
+| `aruco_config.json` | Marker IDs → robot XY (mm), marker size, ArUco dictionary |
+| `homography_matrix.json` | Saved homography matrix H (written by calibration, read at startup) |
+| `robot/zero_pose.json` | Reference pose for relative XY moves |
 | `.env` | `GEMINI_API_KEY` |
 
-### Python-pakker
+---
 
-| Pakke | Brukes til |
-|-------|-----------|
-| `flask` | HTTP-server og template-rendering |
-| `opencv-contrib-python` | MJPEG-encoding, ArUco-deteksjon, bildeprosessering |
-| `numpy` | Matrise- og piksel-operasjoner |
-| `python-dotenv` | Laste `.env` ved oppstart |
-| `google-genai` | Gemini API-klient (via `ai.detection`) |
+## Coordinate conversion in the server
 
-## API-endepunkter
+User-facing moves in mm/degrees are converted before sending to the robot:
 
-### Visning
+```python
+MM_SCALE = [0.001, -0.001, -0.001]   # mm→m, Y and Z axes inverted
 
-| Endepunkt | Metode | Beskrivelse |
-|-----------|--------|-------------|
-| `/` | GET | Serverer `index.html` |
-| `/stream` | GET | MJPEG live-kamerafeed (multipart/x-mixed-replace) |
-| `/api/last_capture` | GET | Siste analyserte bilde som JPEG |
-| `/api/status` | GET | `{msg, busy, has_capture}` |
+def _mm_to_robot(x, y, z, rx_deg=0, ry_deg=0, rz_deg=0):
+    return transform_robot_coordinates([[x, y, z, rx_deg, ry_deg, rz_deg]], scale=MM_SCALE)[0]
+```
 
-### Gjenkjenning
+The Y and Z sign flip maps the UI display frame to the UR3's physical axis convention.
 
-| Endepunkt | Metode | Body | Beskrivelse |
-|-----------|--------|------|-------------|
-| `/api/analyze` | POST | `{"mode": "bbox"\|"grabcut"}` | Fanger bilde, sender til Gemini, returnerer deteksjoner og lagrer annotert bilde |
+---
 
-### Kalibrering
-
-| Endepunkt | Metode | Beskrivelse |
-|-----------|--------|-------------|
-| `/api/calibrate/run` | POST | Kjører ArUco-kalibrering, fryser arbeidsområde-polygon, lagrer `homography_matrix.json` |
-| `/api/calibrate/status` | GET | `{detected, missing, needed, calibrated}` — hvilke markører kameraet ser nå |
-| `/api/calibrate/preview` | GET | JPEG med markør-omriss tegnet på (for kalibreringsfeltet i UI) |
-| `/api/calibrate/overlay` | POST | Toggle: vis/skjul markør-overlay i live-feeden |
-| `/api/workspace/toggle` | POST | Toggle: masker arbeidsområdet i bilder sendt til Gemini |
-
-## Tilstandsvariabler (server.py)
-
-| Variabel | Type | Beskrivelse |
-|----------|------|-------------|
-| `_cam` | `BRIOCamera` | Kamerainstans, åpnes ved oppstart |
-| `_client` | `genai.Client` | Gemini-klient, `None` hvis API-nøkkel mangler |
-| `_homography` | `HomographyConverter` | Holder homografi-matrisen H |
-| `_aruco` | `ArucoCalibrator\|None` | Lazy-initialisert fra `aruco_config.json` |
-| `_workspace_hull` | `ndarray\|None` | Cachet polygon (piksler) — settes ved kalibrering, endres ikke under drift |
-| `_last_capture` | `bytes\|None` | JPEG-bytes fra siste analyse |
-| `_calib_overlay` | `bool` | Om markør-overlay er aktiv i live-feed |
-| `_mask_workspace` | `bool` | Om arbeidsområde-masking er aktiv |
-
-## Dataflyt
+## Data flow
 
 ```
-Nettleser
+Browser
   │
-  ├─ GET /stream ──────────────────► BRIOCamera.capture_frame()
-  │                                       │ [hvis _calib_overlay]
-  │                                       └─► ArucoCalibrator.draw_detections()
+  ├─ GET /stream ──────────────► BRIOCamera.capture_frame()
+  │                                   │ [if _calib_overlay]
+  │                                   └─► ArucoCalibrator.draw_detections()
   │
-  ├─ POST /api/analyze ────────────► BRIOCamera.capture_frame()
-  │                                       │ [hvis _mask_workspace]
-  │                                       ├─► _apply_workspace_mask()
-  │                                       └─► ai.detection.detect_objects() ──► Gemini API
-  │                                               └─► vision.annotation.draw_boxes/draw_contours()
+  ├─ POST /api/analyze ────────► BRIOCamera.capture_frame()
+  │                                   │ [if _mask_workspace]
+  │                                   ├─► _apply_workspace_mask()
+  │                                   └─► detect_objects() ──► Gemini API
+  │                                           └─► draw_boxes / draw_contours()
   │
-  └─ POST /api/calibrate/run ──────► HomographyConverter.calibrate_aruco()
-                                          ├─► ArucoCalibrator.calibrate()
-                                          ├─► cv2.findHomography()
-                                          ├─► homography_matrix.json (skrives)
-                                          └─► _freeze_workspace_hull()
+  ├─ POST /api/calibrate/run ──► HomographyConverter.calibrate_aruco()
+  │                                   ├─► ArucoCalibrator.calibrate()
+  │                                   ├─► cv2.findHomography(RANSAC)
+  │                                   ├─► homography_matrix.json (written)
+  │                                   └─► _freeze_workspace_hull()
+  │
+  └─ POST /api/robot/pick_and_place
+          ├─► convert_gemini_to_robot(ny, nx)   [pick coords]
+          ├─► convert_gemini_to_robot(ny, nx)   [place coords]
+          └─► RobotActionTools.pick_object_at() + place_object_at()
 ```
+
+---
+
+## Key globals (server.py)
+
+| Variable | Type | Purpose |
+|----------|------|---------|
+| `_cam` | `BRIOCamera` | Camera instance; opened at startup |
+| `_client` | `genai.Client` | Gemini client; `None` if API key missing |
+| `_homography` | `HomographyConverter` | H matrix; loaded from file at startup |
+| `_aruco` | `ArucoCalibrator\|None` | Lazy-init from `aruco_config.json` |
+| `_robot` | `UR3Controller\|None` | `None` until `/api/robot/connect` |
+| `_robot_tools` | `RobotActionTools\|None` | `None` until robot connected |
+| `_workspace_hull` | `np.ndarray\|None` | Convex hull polygon; set after calibration |
+| `_last_capture` | `bytes\|None` | JPEG bytes from last analysis |
+| `_calib_overlay` | `bool` | ArUco overlay active in live feed |
+| `_mask_workspace` | `bool` | Workspace masking active for Gemini |
+
+See [docs/api.md](../docs/api.md) for the full endpoint reference.
