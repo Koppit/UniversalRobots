@@ -430,40 +430,6 @@ class UR3Controller:
 
         return {"result": "Success"}
 
-
-
-    def move_robot(self, coordinates):
-        """Transform and move the UR3 to a six-axis target pose.
-
-        ``coordinates`` must be a six-item list in the external/world frame:
-        ``[x, y, z, rx, ry, rz]``. The pose is converted into robot-frame
-        coordinates with the controller's configured ``scale``, ``translation``,
-        and ``rotation`` values, then passed to ``move_to_xyz_j`` with a fixed
-        safe lift height of 0.25 meters.
-
-        Position values are expected to match the configured scale, which
-        defaults to millimeters-to-meters conversion. Rotation values should
-        match the convention expected by ``transform_robot_coordinates``.
-        Invalid inputs return ``False`` without sending a movement command.
-        Valid inputs return ``True`` and moves the arm.
-        """
-
-        if type(coordinates) is not list:
-            return {f'"result": "Failure", "Reason":"coordinates is {type(coordinates)} not list"'}
-
-        if len(coordinates) != 6:
-            return {f'"result": "Failure", "Reason":"coordinates length is {len(coordinates)} not 6"'}
-
-
-        transformed_coords = transform_robot_coordinates([coordinates],
-                                                        scale=self.scale, 
-                                                        translation=self.translation, 
-                                                        rotation=self.rotation )
-        self.move_to_xyz_j(transformed_coords[0], safe_z=0.25)
-
-        return {"result": "Success"}
-
-
     def move_to_joints(self, q: list, speed=0.5, acceleration=0.5):
         """Moves directly to a joint configuration [j0..j5] in radians using MOVEJ.
 
