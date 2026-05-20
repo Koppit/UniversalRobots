@@ -135,10 +135,14 @@ Use the **Verifiser kalibrering** panel in the **Kalibrering** tab to confirm ac
 
 ## File overview
 
+See [file-Overview.md](file-Overview.md) for the complete listing with status (active / standalone / test / legacy).
+
+Core runtime files loaded by `web/server.py`:
+
 ```
 robot/
-  set_robot_zero.py     # Run once to capture the work area centre as reference pose
   ur3_controller.py     # UR3Controller + RobotiqGripper (RTDE)
+  robotiq_preamble.py   # URScript preamble constant used by ur3_controller
   transform.py          # 6-axis coordinate transformation utilities
   zero_pose.json        # Written by set_robot_zero.py
 
@@ -151,7 +155,6 @@ vision/
 ai/
   detection.py          # detect_objects() via Gemini API
   gemini_agent.py       # Task-driven agent (natural language → robot action)
-  mcp_server.py         # MCP server exposing robot+vision tools to Claude
 
 tools/
   robot_tools.py        # RobotActionTools — pick/place sequences bridging Gemini→robot
@@ -165,10 +168,19 @@ homography_matrix.json  # Auto-generated; do not edit manually
 requirements.txt        # Python dependencies
 ```
 
+Standalone scripts (not imported by the server):
+
+```
+robot/set_robot_zero.py   # Run once to capture work area centre as reference pose
+ai/mcp_server.py          # FastMCP server wrapping the Flask API — for Claude MCP access
+robot/mcp_server.py       # Early direct-robot MCP server (port 8001); superseded by ai/mcp_server.py
+```
+
 ---
 
 ## Documentation
 
+- [file-Overview.md](file-Overview.md) — Complete file listing with active/standalone/test/legacy status
 - [docs/api.md](docs/api.md) — All Flask API endpoints with request/response shapes
 - [docs/architecture.md](docs/architecture.md) — Component map and data flow
 - [docs/coordinates.md](docs/coordinates.md) — Coordinate systems and conversions
