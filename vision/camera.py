@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import sys
 import subprocess
 import time
 import threading
@@ -19,10 +20,56 @@ class BRIOCamera:
         self.height = height
         self.fps = fps
         self._cap: cv2.VideoCapture | None = None
+        self._backend_name: str | None = None
         self._latest_frame: np.ndarray | None = None
+        self._last_frame_at = 0.0
+        self._frame_count = 0
+        self._read_failures = 0
         self._lock = threading.Lock()
         self._running = False
         self._thread: threading.Thread | None = None
+
+    @staticmethod
+    def _candidate_backends() -> list[tuple[str, int]]:
+        """Return OpenCV camera backends in a stable, Windows-friendly order."""
+        if sys.platform.startswith("win"):
+            return [
+                ("DSHOW", cv2.CAP_DSHOW),
+                ("MSMF", cv2.CAP_MSMF),
+                ("ANY", cv2.CAP_ANY),
+            ]
+        return [("ANY", cv2.CAP_ANY)]
+
+    @staticmethod
+    def _open_capture(index: int, backend: int) -> cv2.VideoCapture:
+        cap = cv2.VideoCapture()
+        try:
+            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 2000)
+            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 2000)
+        except Exception:
+            pass
+        if backend == cv2.CAP_ANY:
+            cap.open(index)
+        else:
+            cap.open(index, backend)
+        return cap
+
+    @staticmethod
+    def _configure_capture(cap: cv2.VideoCapture, width: int, height: int, fps: int | None = None) -> None:
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc("M", "J", "P", "G"))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        if fps is not None:
+            cap.set(cv2.CAP_PROP_FPS, fps)
+
+    @staticmethod
+    def _read_frame(cap: cv2.VideoCapture, attempts: int = 10, delay_s: float = 0.03) -> np.ndarray | None:
+        for _ in range(attempts):
+            ret, frame = cap.read()
+            if ret and frame is not None and frame.size > 0:
+                return frame
+            time.sleep(delay_s)
+        return None
 
     # ------------------------------------------------------------------
     # Auto-deteksjon
@@ -69,34 +116,36 @@ class BRIOCamera:
         best_unique = -1
 
         for idx in range(max_index):
-            cap = cv2.VideoCapture()
-            cap.open(idx + cv2.CAP_MSMF)
-            if not cap.isOpened():
+            for backend_name, backend in BRIOCamera._candidate_backends():
+                cap = BRIOCamera._open_capture(idx, backend)
+                if not cap.isOpened():
+                    cap.release()
+                    continue
+
+                BRIOCamera._configure_capture(cap, 1280, 720)
+
+                hashes = []
+                for _ in range(sample_frames):
+                    frame = BRIOCamera._read_frame(cap, attempts=1, delay_s=0.0)
+                    if frame is not None:
+                        hashes.append(hashlib.md5(frame.tobytes()).hexdigest())
+                    time.sleep(0.04)
+
+                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 cap.release()
-                continue
+                time.sleep(0.2)
 
-            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                unique = len(set(hashes))
+                print(f"  Index {idx} ({backend_name}): {unique}/{len(hashes)} unike frames  ({w}x{h})")
 
-            hashes = []
-            for _ in range(sample_frames):
-                ret, frame = cap.read()
-                if ret and frame is not None and frame.size > 0:
-                    hashes.append(hashlib.md5(frame).hexdigest())
-                time.sleep(0.04)
-
-            cap.release()
-            time.sleep(0.2)
-
-            unique = len(set(hashes))
-            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            print(f"  Index {idx}: {unique}/{len(hashes)} unike frames  ({w}x{h})")
-
-            if unique > best_unique:
-                best_unique = unique
-                best_index  = idx
+                if unique > best_unique:
+                    best_unique = unique
+                    best_index = idx
+                if unique > 0:
+                    break
+            if best_unique >= sample_frames:
+                break
 
         if best_index is not None:
             print(f"[Kamera] BRIO funnet på index {best_index} ({best_unique}/{sample_frames} unike frames)")
@@ -108,43 +157,70 @@ class BRIOCamera:
     # Åpne / lukke
     # ------------------------------------------------------------------
 
+    def _connect_capture(self) -> tuple[str, cv2.VideoCapture, np.ndarray] | None:
+        if self.device_index is None:
+            return None
+        for backend_name, backend in self._candidate_backends():
+            cap = self._open_capture(self.device_index, backend)
+            if not cap.isOpened():
+                cap.release()
+                continue
+
+            self._configure_capture(cap, self.width, self.height, self.fps)
+            frame = self._read_frame(cap, attempts=10)
+            if frame is not None:
+                return backend_name, cap, frame
+
+            cap.release()
+        return None
+
     def open(self) -> bool:
         if self.device_index is None:
             self.device_index = self.find_brio()
             if self.device_index is None:
                 return False
 
-        cap = cv2.VideoCapture()
-        cap.open(self.device_index + cv2.CAP_MSMF)
-        if not cap.isOpened():
-            print(f"[Kamera] FEIL: Kan ikke åpne enhet {self.device_index}.")
+        selected = self._connect_capture()
+        if selected is None:
+            print(f"[Kamera] FEIL: Kan ikke åpne enhet {self.device_index}, eller den leverer ingen frames.")
             return False
 
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        cap.set(cv2.CAP_PROP_FPS, self.fps)
-
-        ok = False
-        for _ in range(10):
-            ret, frame = cap.read()
-            if ret and frame is not None and frame.size > 0:
-                ok = True
-                break
-        if not ok:
-            cap.release()
-            print(f"[Kamera] FEIL: Enhet {self.device_index} åpnet men leverer ingen frames.")
-            return False
-
+        backend_name, cap, frame = selected
         self._cap = cap
+        self._backend_name = backend_name
+        with self._lock:
+            self._latest_frame = frame
+            self._last_frame_at = time.monotonic()
+            self._frame_count = 1
+            self._read_failures = 0
         actual_w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         actual_h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         actual_fps = cap.get(cv2.CAP_PROP_FPS)
-        print(f"[Kamera] Åpnet enhet {self.device_index} ({actual_w}x{actual_h} @ {actual_fps:.0f}fps)")
+        print(f"[Kamera] Åpnet enhet {self.device_index} via {backend_name} ({actual_w}x{actual_h} @ {actual_fps:.0f}fps)")
 
         self._running = True
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
+        return True
+
+    def _reopen_capture(self) -> bool:
+        old_cap = self._cap
+        if old_cap and old_cap.isOpened():
+            old_cap.release()
+
+        selected = self._connect_capture()
+        if selected is None:
+            return False
+
+        backend_name, cap, frame = selected
+        self._cap = cap
+        self._backend_name = backend_name
+        with self._lock:
+            self._latest_frame = frame
+            self._last_frame_at = time.monotonic()
+            self._frame_count += 1
+            self._read_failures = 0
+        print(f"[Kamera] Koblet til kamera på nytt via {backend_name}.")
         return True
 
     def close(self):
@@ -162,16 +238,54 @@ class BRIOCamera:
 
     def _capture_loop(self):
         """Bakgrunnstråd — leser frames kontinuerlig så hovedtråden aldri blokkerer."""
-        while self._running and self._cap and self._cap.isOpened():
-            ret, frame = self._cap.read()
+        while self._running:
+            if not self._cap or not self._cap.isOpened():
+                print("[Kamera] Kamerahandle er lukket. Prøver å åpne på nytt...")
+                if not self._reopen_capture():
+                    time.sleep(1.0)
+                continue
+
+            try:
+                ret, frame = self._cap.read()
+            except cv2.error as exc:
+                print(f"[Kamera] FEIL ved lesing av frame: {exc}")
+                ret, frame = False, None
+
             if ret and frame is not None and frame.size > 0:
                 with self._lock:
                     self._latest_frame = frame
+                    self._last_frame_at = time.monotonic()
+                    self._frame_count += 1
+                    self._read_failures = 0
+            else:
+                with self._lock:
+                    self._read_failures += 1
+                    failures = self._read_failures
+                if failures >= max(30, self.fps * 2):
+                    print(f"[Kamera] Ingen nye frames etter {failures} forsøk. Åpner kamera på nytt...")
+                    if self._reopen_capture():
+                        continue
+                    with self._lock:
+                        self._read_failures = 0
+                time.sleep(0.03)
 
     def capture_frame(self) -> np.ndarray | None:
         """Returnerer siste frame fra bakgrunnstråden (blokkerer aldri)."""
         with self._lock:
             return self._latest_frame.copy() if self._latest_frame is not None else None
+
+    def stats(self) -> dict:
+        """Returnerer enkel kamerastatus for web/status og feilsøking."""
+        with self._lock:
+            age = time.monotonic() - self._last_frame_at if self._last_frame_at else None
+            return {
+                "device_index": self.device_index,
+                "backend": self._backend_name,
+                "running": self._running,
+                "frame_count": self._frame_count,
+                "last_frame_age_s": round(age, 3) if age is not None else None,
+                "read_failures": self._read_failures,
+            }
 
     def capture_jpeg_b64(self, quality: int = 85) -> str | None:
         """Fanger ett bilde og returnerer base64-kodet JPEG-string for Gemini API."""

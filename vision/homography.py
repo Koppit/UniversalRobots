@@ -196,7 +196,7 @@ class HomographyConverter:
     def warp_to_topdown(self, frame: np.ndarray) -> np.ndarray | None:
         """Apply the precomputed top-down warp to a camera frame.
 
-        The result is rotated 180° to match the physical camera mounting orientation
+        The result is rotated 180 degrees to match the physical camera mounting orientation
         (camera is mounted so that robot X_max/Y_max appears at the top-left of the
         raw image). Returns None if not yet calibrated.
         """
@@ -209,14 +209,15 @@ class HomographyConverter:
             borderMode=cv2.BORDER_CONSTANT,
             borderValue=(0, 0, 0),
         )
-        return cv2.flip(warped, 1)  # 1 = horizontal flip (left↔right only)
+        return cv2.rotate(warped, cv2.ROTATE_180)  # vertical + horizontal flip
 
     def topdown_gemini_to_robot(self, ny: float, nx: float) -> tuple[float, float]:
         """Convert Gemini 0-1000 normalised coordinates from a top-down warped frame
         to robot XY metres using a simple linear formula.
 
-        X is inverted to match the horizontal flip applied in warp_to_topdown:
-        nx=0 → x_max, nx=1000 → x_min. Y is unchanged.
+        X is inverted by the displayed top-down orientation:
+        nx=0 -> x_max, nx=1000 -> x_min. Y increases top to bottom:
+        ny=0 -> y_min, ny=1000 -> y_max.
         """
         if self._topdown_bounds is None:
             raise RuntimeError("setup_topdown() har ikke blitt kalt ennå.")

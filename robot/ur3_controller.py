@@ -4,8 +4,8 @@ import os
 import time
 import rtde_control
 from rtde_receive import RTDEReceiveInterface
-from robotiq_preamble import ROBOTIQ_PREAMBLE
-from transform import transform_robot_coordinates
+from .robotiq_preamble import ROBOTIQ_PREAMBLE
+from .transform import transform_robot_coordinates
 
 # -- Robotiq Gripper Klasse (Ekstrahert for ryddighet) --
 class RobotiqGripper(object):

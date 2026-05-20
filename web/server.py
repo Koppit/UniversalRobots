@@ -27,7 +27,7 @@ import numpy as np
 from flask import Flask, Response, render_template, jsonify, request
 
 from vision.camera import BRIOCamera  # noqa: E402
-from vision.homography import HomographyConverter  # noqa: E402
+from vision.homography import GEMINI_GRID, HomographyConverter  # noqa: E402
 from vision.aruco_calibrator import ArucoCalibrator  # noqa: E402
 from vision.annotation import draw_boxes, draw_contours  # noqa: E402
 from ai.detection import make_client, detect_objects  # noqa: E402
@@ -85,6 +85,7 @@ _homography = HomographyConverter()
 _homography.load()  # load previously saved matrix if it exists
 _aruco: ArucoCalibrator | None = None  # lazy-init after config is confirmed to exist
 _calib_overlay = True
+_analysis_flip_horizontal = True
 _mask_workspace = True
 _workspace_hull: np.ndarray | None = None  # cached after calibration, never updated mid-run
 _auto_calib_done = False
@@ -138,8 +139,14 @@ def _list_available_cameras(max_index: int = 5) -> list[dict]:
     result = []
     wmi_pos = 0
     for i in range(max_index):
-        cap = cv2.VideoCapture(i + cv2.CAP_MSMF)
-        if cap.isOpened():
+        cap = None
+        for _, backend in BRIOCamera._candidate_backends():
+            cap = BRIOCamera._open_capture(i, backend)
+            if cap.isOpened():
+                break
+            cap.release()
+            cap = None
+        if cap is not None and cap.isOpened():
             cap.release()
             label = wmi_names[wmi_pos] if wmi_pos < len(wmi_names) else f"Kamera {i}"
             result.append({"index": i, "label": label})
@@ -168,23 +175,35 @@ def _init():
 # ---------------------------------------------------------------------------
 # MJPEG stream generator
 # ---------------------------------------------------------------------------
+def _status_frame(message: str) -> np.ndarray:
+    frame = np.zeros((360, 640, 3), dtype=np.uint8)
+    frame[:] = (28, 32, 36)
+    cv2.putText(frame, "Kamera ikke klar", (36, 150),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (230, 230, 230), 2, cv2.LINE_AA)
+    cv2.putText(frame, message[:58], (36, 200),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 190, 200), 1, cv2.LINE_AA)
+    return frame
+
+
 def _generate_stream():
     while True:
         frame = _cam.capture_frame()
-        if frame is not None:
+        if frame is None:
+            frame = _status_frame(_status_msg)
+        else:
             if _calib_overlay:
                 aruco = _get_aruco()
                 if aruco is not None:
                     detections = aruco.detect(frame)
                     frame = aruco.draw_detections(frame, detections)
                 frame = _draw_workspace_boundary(frame)
-            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n"
-                + buf.tobytes()
-                + b"\r\n"
-            )
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n"
+            + buf.tobytes()
+            + b"\r\n"
+        )
         time.sleep(0.033)
 
 
@@ -231,7 +250,7 @@ def analyze():
     # Gemini coordinates map linearly to robot coords (no H needed).
     topdown = _homography.warp_to_topdown(frame)
     if topdown is not None:
-        gemini_frame = topdown
+        gemini_frame = cv2.flip(topdown, 1) if _analysis_flip_horizontal else topdown
         _log("info", "Topdown-warp aktiv – sender fugleperspektiv til Gemini.")
     else:
         gemini_frame = _apply_workspace_mask(frame) if _mask_workspace else frame
@@ -256,7 +275,8 @@ def analyze():
                 nx = (box[1] + box[3]) / 2
                 try:
                     if topdown is not None:
-                        rx, ry = _homography.topdown_gemini_to_robot(ny, nx)
+                        map_nx = GEMINI_GRID - nx if _analysis_flip_horizontal else nx
+                        rx, ry = _homography.topdown_gemini_to_robot(ny, map_nx)
                     else:
                         rx, ry = _homography.convert_gemini_to_robot(ny, nx)
                     det["rx_mm"] = round(rx * 1000, 1)
@@ -316,7 +336,8 @@ def api_preview_coords():
     try:
         use_topdown = data.get("topdown", False) and _homography._topdown_bounds is not None
         if use_topdown:
-            rx, ry = _homography.topdown_gemini_to_robot(ny, nx)
+            map_nx = GEMINI_GRID - nx if _analysis_flip_horizontal else nx
+            rx, ry = _homography.topdown_gemini_to_robot(ny, map_nx)
         else:
             rx, ry = _homography.convert_gemini_to_robot(ny, nx)
         return jsonify({"calibrated": True, "rx_mm": round(rx * 1000, 1), "ry_mm": round(ry * 1000, 1)})
@@ -538,7 +559,10 @@ def assistant_command():
 
     # Use top-down warped frame so Gemini coordinates match the rest of the system
     topdown = _homography.warp_to_topdown(frame)
-    send_frame = topdown if topdown is not None else frame
+    if topdown is not None:
+        send_frame = cv2.flip(topdown, 1) if _analysis_flip_horizontal else topdown
+    else:
+        send_frame = frame
 
     import cv2 as _cv2
     _, buf = _cv2.imencode(".jpg", send_frame, [_cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -733,7 +757,7 @@ def _draw_coord_grid(frame: np.ndarray, H: np.ndarray, aruco) -> np.ndarray:
 def _draw_topdown_grid(frame: np.ndarray, x_min, x_max, y_min, y_max) -> np.ndarray:
     """Draw 4×4 coordinate grid on an already-warped top-down image.
 
-    Assumes the image was produced by warp_to_topdown (horizontal flip applied), so:
+    Assumes the image was produced by warp_to_topdown (180-degree flip applied), so:
       - X decreases left → right  (x_max at left edge, x_min at right)
       - Y increases top → bottom  (y_min at top,       y_max at bottom)
     Grid lines are perfectly straight in this space, so no perspective transform needed.
