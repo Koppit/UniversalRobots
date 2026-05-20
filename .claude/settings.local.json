@@ -3,7 +3,12 @@
     "allow": [
       "Bash(Get-ChildItem -Path \"d:\\\\git\\\\2026_Samling_2_repo\\\\UniversalRobots\" -Recurse -Force)",
       "Bash(Select-Object FullName)",
-      "Bash(ConvertTo-Csv -NoTypeInformation)"
+      "Bash(ConvertTo-Csv -NoTypeInformation)",
+      "Bash(Get-ChildItem -Path \"e:\\\\git\\\\UniversalRobots\" -Recurse -Directory)",
+      "Bash(Get-ChildItem -Path \"e:\\\\git\\\\UniversalRobots\" -Recurse -Force)",
+      "Bash(Select-Object -Property FullName)",
+      "Bash(Sort-Object FullName)",
+      "Bash(Format-Table -AutoSize)"
     ]
   }
 }

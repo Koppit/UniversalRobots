@@ -70,7 +70,7 @@ class BRIOCamera:
 
         for idx in range(max_index):
             cap = cv2.VideoCapture()
-            cap.open(idx + cv2.CAP_DSHOW)
+            cap.open(idx + cv2.CAP_MSMF)
             if not cap.isOpened():
                 cap.release()
                 continue
@@ -115,7 +115,7 @@ class BRIOCamera:
                 return False
 
         cap = cv2.VideoCapture()
-        cap.open(self.device_index + cv2.CAP_DSHOW)
+        cap.open(self.device_index + cv2.CAP_MSMF)
         if not cap.isOpened():
             print(f"[Kamera] FEIL: Kan ikke åpne enhet {self.device_index}.")
             return False

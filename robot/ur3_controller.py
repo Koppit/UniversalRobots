@@ -266,9 +266,15 @@ class UR3Controller:
             self.connected = True
             print("[UR3] Tilkoblet!")
             return True
-        except Exception as e:
+        except BaseException as e:
             print(f"[UR3] Feil ved tilkobling: {e}")
             return False
+
+    def emergency_stop(self):
+        try:
+            self.rtde_c.stopScript()
+        except Exception:
+            pass
 
     def disconnect(self):
         if self.connected:
@@ -280,29 +286,42 @@ class UR3Controller:
 
     def get_xyz(self):
         """Henter X, Y, Z i meter (TCP-pose)."""
-        if not self.connected: 
+        if not self.connected:
             return None
-        pose = list(self.rtde_r.getActualTCPPose())
-        return pose[:3]  # Returnerer [X, Y, Z]
+        try:
+            pose = list(self.rtde_r.getActualTCPPose())
+            return pose[:3]
+        except Exception:
+            self.connected = False
+            return None
 
     def get_pose(self):
         """Henter [x,y,z,rx,ry,rz] (TCP-pose)."""
-        if not self.connected: 
+        if not self.connected:
             return None
-        return list(self.rtde_r.getActualTCPPose())
+        try:
+            return list(self.rtde_r.getActualTCPPose())
+        except Exception:
+            self.connected = False
+            return None
 
     def move_to_xyz(self, coords, speed=0.10, acceleration=0.25):
         """Flytter armen lineært (moveL) til spesifikke X,Y,Z i meter uten å endre rotasjonen.
 
         If a zero pose has been set, coords are treated as relative to that frame.
         """
+        print(f"[UR3] moveL  rel → X:{coords[0]:.4f}  Y:{coords[1]:.4f}  Z:{coords[2]:.4f}")
         if not self.connected:
-            print(f"[Mock UR3] Flytter til X:{coords[0]:.3f}, Y:{coords[1]:.3f}, Z:{coords[2]:.3f}")
+            print(f"[UR3] (mock — ikke tilkoblet)")
             return
 
         target = self._apply_reference_frame(coords)
-        print(f"[UR3] moveL til X:{target[0]:.3f}, Y:{target[1]:.3f}, Z:{target[2]:.3f}...")
-        self.rtde_c.moveL(target, speed=speed, acceleration=acceleration)
+        print(f"[UR3] moveL  abs → X:{target[0]:.4f}  Y:{target[1]:.4f}  Z:{target[2]:.4f}")
+        try:
+            self.rtde_c.moveL(target, speed=speed, acceleration=acceleration)
+        except Exception as e:
+            self.connected = False
+            raise RuntimeError(f"Robot mistet tilkobling: {e}") from e
 
     def move_to_xyz_j(self, coords, speed=0.5, acceleration=0.5, safe_z: float = None):
         """Moves the arm using MOVEJ (joint-space interpolation via inverse kinematics).
@@ -349,7 +368,68 @@ class UR3Controller:
                         print(f"[UR3] Safe-lift skipped: {e}")
 
         print(f"[UR3] moveJ to X:{target[0]:.3f}, Y:{target[1]:.3f}, Z:{target[2]:.3f}...")
-        self.rtde_c.moveJ_IK(target, speed=speed, acceleration=acceleration)
+        try:
+            self.rtde_c.moveJ_IK(target, speed=speed, acceleration=acceleration)
+        except Exception as e:
+            self.connected = False
+            raise RuntimeError(f"Robot mistet tilkobling: {e}") from e
+
+    def lift_to_absolute_z(self, abs_z: float, speed=0.5, acceleration=0.5):
+        """Lift TCP to abs_z (absolute metres) keeping current XY and orientation.
+
+        Does nothing if already at or above abs_z, or if not connected.
+        """
+        if not self.connected:
+            return
+        current = self.get_pose()
+        if current is None or current[2] >= abs_z:
+            return
+        target = list(current)
+        target[2] = abs_z
+        try:
+            self._check_workspace(target)
+        except ValueError as e:
+            print(e)
+            return
+        print(f"[UR3] Lift Z {current[2]:.3f} → {abs_z:.3f} m")
+        try:
+            self.rtde_c.moveJ_IK(target, speed=speed, acceleration=acceleration)
+        except Exception as e:
+            self.connected = False
+            raise RuntimeError(f"Robot mistet tilkobling: {e}") from e
+
+
+    def move_robot(self, coordinates):
+        """Transform and move the UR3 to a six-axis target pose.
+
+        ``coordinates`` must be a six-item list in the external/world frame:
+        ``[x, y, z, rx, ry, rz]``. The pose is converted into robot-frame
+        coordinates with the controller's configured ``scale``, ``translation``,
+        and ``rotation`` values, then passed to ``move_to_xyz_j`` with a fixed
+        safe lift height of 0.25 meters.
+
+        Position values are expected to match the configured scale, which
+        defaults to millimeters-to-meters conversion. Rotation values should
+        match the convention expected by ``transform_robot_coordinates``.
+        Invalid inputs return ``False`` without sending a movement command.
+        Valid inputs return ``True`` and moves the arm.
+        """
+
+        if type(coordinates) is not list:
+            return {f'"result": "Failure", "Reason":"coordinates is {type(coordinates)} not list"'}
+
+        if len(coordinates) != 6:
+            return {f'"result": "Failure", "Reason":"coordinates length is {len(coordinates)} not 6"'}
+
+
+        transformed_coords = transform_robot_coordinates([coordinates],
+                                                        scale=self.scale, 
+                                                        translation=self.translation, 
+                                                        rotation=self.rotation )
+        self.move_to_xyz_j(transformed_coords[0], safe_z=0.25)
+
+        return {"result": "Success"}
+
 
 
     def move_robot(self, coordinates):
@@ -428,7 +508,7 @@ if __name__ == "__main__":
     # robot.connect()
     robot.connect()
     print("MOCK TEST: ", robot.get_pose())
-    robot.move_to_xyz(0, 0, 0)
+    robot.move_to_xyz_j([0, 0, 0, 0, 0, 0])
     time.sleep(2)
 
     # robot.grab_object()

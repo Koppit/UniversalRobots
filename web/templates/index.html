@@ -42,6 +42,35 @@
     .dot.busy    { background: #f59e0b; box-shadow: 0 0 6px #f59e0b88; }
     .dot.error   { background: #ef4444; box-shadow: 0 0 6px #ef444488; }
 
+    /* ── Tab bar ── */
+    .tab-bar {
+      display: flex;
+      background: #161927;
+      border-bottom: 2px solid #2d3148;
+      padding: 0 16px;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      background: transparent;
+      border: none;
+      border-bottom: 3px solid transparent;
+      color: #64748b;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 10px 18px;
+      cursor: pointer;
+      margin-bottom: -2px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab-btn:hover { color: #a5b4fc; }
+    .tab-btn.active { color: #a5b4fc; border-bottom-color: #6366f1; }
+
+    /* ── Tab content ── */
+    .tab-content { display: none; flex: 1; flex-direction: column; overflow: auto; }
+    .tab-content.active { display: flex; }
+
     /* ── Main layout ── */
     main {
       flex: 1;
@@ -271,13 +300,17 @@
       transform: translateX(-50%);
     }
 
+    /* ── Jog panel (collapsible) ── */
+    #jog-panel { display: none; flex-direction: column; gap: 8px; min-width: 280px; }
+    #jog-panel.open { display: flex; }
+
     /* ── Calibration panel ── */
     .calib-panel {
-      grid-column: 1 / -1;
       background: #1a1d2e;
       border: 1px solid #2d3148;
       border-radius: 8px;
       overflow: hidden;
+      margin: 12px;
     }
     .calib-toggle {
       width: 100%;
@@ -296,26 +329,6 @@
       align-items: center;
     }
     .calib-toggle:hover { background: #2e3257; }
-    .calib-body {
-      display: none;
-      padding: 14px;
-      gap: 14px;
-      align-items: flex-start;
-    }
-    .calib-body.open { display: flex; flex-wrap: wrap; }
-    .calib-preview-wrap {
-      flex: 0 0 auto;
-      width: 320px;
-      height: 180px;
-      background: #0a0c14;
-      border-radius: 6px;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .calib-preview-wrap img { max-width: 100%; max-height: 100%; display: block; }
-    .calib-controls { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 200px; }
     .marker-grid {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -366,6 +379,62 @@
       min-height: 18px;
     }
 
+    /* ── Debug console ── */
+    .console-panel {
+      background: #1a1d2e;
+      border: 1px solid #2d3148;
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 12px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+    }
+    .console-panel-header {
+      background: #0f172a;
+      border: none;
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 8px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: 'Cascadia Code', 'Fira Mono', monospace;
+      flex-shrink: 0;
+    }
+    .console-body {
+      display: block;
+      flex: 1;
+      min-height: 300px;
+      overflow-y: auto;
+      font-family: 'Cascadia Code', 'Fira Mono', 'Consolas', monospace;
+      font-size: 12px;
+      padding: 8px 10px;
+      background: #050810;
+    }
+    .log-line { padding: 2px 0; display: flex; gap: 8px; line-height: 1.5; }
+    .log-ts   { color: #475569; flex-shrink: 0; }
+    .log-tag  { flex-shrink: 0; font-weight: 700; width: 50px; text-align: right; }
+    .log-msg  { color: #94a3b8; white-space: pre-wrap; word-break: break-all; }
+    .log-info    .log-tag { color: #38bdf8; }
+    .log-warning .log-tag { color: #fbbf24; }
+    .log-error   .log-tag { color: #f87171; }
+    .log-error   .log-msg { color: #fca5a5; }
+    .log-js      .log-tag { color: #a78bfa; }
+    #console-clear {
+      background: transparent;
+      border: 1px solid #2d3148;
+      color: #475569;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #console-clear:hover { color: #94a3b8; border-color: #475569; }
+
     /* ── Status bar ── */
     footer {
       background: #1a1d2e;
@@ -386,28 +455,47 @@
   <h1>Robot Vision – Kontrollpanel</h1>
 </header>
 
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('operasjon', this)">Operasjon</button>
+  <button class="tab-btn"        onclick="switchTab('kalibrering', this)">Kalibrering</button>
+  <button class="tab-btn"        onclick="switchTab('debug', this)">Debug</button>
+</div>
+
+<div class="tab-content active" id="tab-operasjon">
 <main>
   <!-- Live feed -->
   <div class="feed-panel">
     <div class="panel-header">
       Live-kamerafeed
       <div style="display:flex;gap:8px;align-items:center">
+        <select id="camera-select" onchange="selectCamera(this.value)"
+          style="background:#0f172a;border:1px solid #334155;color:#94a3b8;
+                 font-size:11px;padding:3px 8px;border-radius:4px;cursor:pointer;
+                 max-width:170px">
+          <option value="">Laster kameraer…</option>
+        </select>
         <button id="btn-overlay" onclick="toggleCalibOverlay()"
-          style="background:#1e293b;border:1px solid #334155;color:#94a3b8;
+          style="background:#1e3a5f;border:1px solid #3b82f6;color:#7dd3fc;
                  font-size:11px;padding:3px 10px;border-radius:4px;cursor:pointer;
                  font-weight:600;letter-spacing:.04em">
-          Vis kalibrering
+          Skjul kalibrering
         </button>
         <button id="btn-mask" onclick="toggleWorkspaceMask()"
-          style="background:#1e293b;border:1px solid #334155;color:#94a3b8;
+          style="background:#1c1917;border:1px solid #78350f;color:#fbbf24;
                  font-size:11px;padding:3px 10px;border-radius:4px;cursor:pointer;
                  font-weight:600;letter-spacing:.04em">
-          Masker område
+          Masker PÅ
+        </button>
+        <button onclick="reconnectCamera()"
+          style="background:#1e293b;border:1px solid #475569;color:#94a3b8;
+                 font-size:11px;padding:3px 10px;border-radius:4px;cursor:pointer;
+                 font-weight:600;letter-spacing:.04em">
+          Tilkoble kamera på nytt
         </button>
       </div>
     </div>
     <div class="feed-img-wrap">
-      <img id="live-img" src="/stream" alt="Live feed">
+      <img id="live-img" src="/stream" alt="Live feed" onclick="liveImgClick(event)" style="cursor:default">
     </div>
   </div>
 
@@ -456,12 +544,35 @@
 
     <div class="ctrl-divider"></div>
 
-    <!-- Robot connection -->
+    <!-- Robot connection + Manuell kjøring -->
     <div class="ctrl-group">
       <label>Robot</label>
       <div id="robot-chip" class="robot-chip">⬤ Frakoblet</div>
       <button class="btn btn-success"  id="btn-robot-connect"    onclick="robotConnect()">Koble til robot</button>
       <button class="btn btn-danger"   id="btn-robot-disconnect" onclick="robotDisconnect()" style="display:none">Koble fra</button>
+      <button class="btn btn-danger"   id="btn-robot-stop"       onclick="robotStop()"       style="display:none">&#9632; Stopp</button>
+      <button class="btn btn-neutral" id="btn-jog-toggle" onclick="toggleJog(this)"
+        style="font-size:12px;text-align:left;padding:7px 14px;margin-top:4px">
+        Manuell kjøring ▼
+      </button>
+      <div id="jog-panel">
+        <label>Kjør til posisjon <span style="font-weight:400;color:#64748b">(mm / grader)</span></label>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
+          <div><span style="font-size:10px;color:#94a3b8">X (mm)</span>
+            <input id="jog-x"  type="number" step="1" value="0" style="width:100%;box-sizing:border-box"></div>
+          <div><span style="font-size:10px;color:#94a3b8">Y (mm)</span>
+            <input id="jog-y"  type="number" step="1" value="0" style="width:100%;box-sizing:border-box"></div>
+          <div><span style="font-size:10px;color:#94a3b8">Z (mm)</span>
+            <input id="jog-z"  type="number" step="1" value="0" style="width:100%;box-sizing:border-box"></div>
+          <div><span style="font-size:10px;color:#94a3b8">RX (°)</span>
+            <input id="jog-rx" type="number" step="1" value="0" style="width:100%;box-sizing:border-box"></div>
+          <div><span style="font-size:10px;color:#94a3b8">RY (°)</span>
+            <input id="jog-ry" type="number" step="1" value="0" style="width:100%;box-sizing:border-box"></div>
+          <div><span style="font-size:10px;color:#94a3b8">RZ (°)</span>
+            <input id="jog-rz" type="number" step="1" value="0" style="width:100%;box-sizing:border-box"></div>
+        </div>
+        <button class="btn btn-warning" id="btn-jog" onclick="jogRobot()" disabled>Kjør ▶</button>
+      </div>
     </div>
 
     <div class="ctrl-divider"></div>
@@ -485,29 +596,42 @@
 
     <div class="ctrl-divider"></div>
 
-    <!-- Speech / AI assistant -->
-    <div class="ctrl-group" style="min-width:200px">
-      <label>Tale-assistent</label>
-      <div style="display:flex;align-items:center;gap:10px">
-        <button id="btn-mic" onclick="toggleSpeech()" disabled title="Si en kommando">🎤</button>
-        <span id="speech-text">Klikk for å snakke til roboten</span>
+    <!-- AI assistant: text prompt + speech -->
+    <div class="ctrl-group" style="min-width:320px;flex:1">
+      <label>AI-assistent</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="assistant-input" type="text"
+               placeholder="F.eks. «Plukk den røde kuben og flytt den til venstre»"
+               style="flex:1;padding:7px 10px;border-radius:6px;border:1px solid #334155;
+                      background:#0f1117;color:#e2e8f0;font-size:13px"
+               onkeydown="if(event.key==='Enter')sendAssistantPrompt()">
+        <button id="btn-assistant-send" onclick="sendAssistantPrompt()" disabled
+                style="padding:7px 14px;border-radius:6px;background:#6366f1;color:#fff;
+                       font-weight:600;border:none;cursor:pointer;white-space:nowrap">
+          Send
+        </button>
+        <button id="btn-mic" onclick="toggleSpeech()" disabled title="Si en kommando"
+                style="padding:7px 10px;border-radius:6px;border:1px solid #334155;
+                       background:#1e2235;color:#e2e8f0;cursor:pointer">🎤</button>
       </div>
+      <div id="assistant-status" style="font-size:12px;color:#94a3b8;margin-top:4px;min-height:16px"></div>
     </div>
 
   </div>
 </main>
+</div><!-- /tab-operasjon -->
 
-  <!-- Calibration panel -->
-  <div class="calib-panel">
-    <button class="calib-toggle" onclick="toggleCalib(this)">
-      <span>Kalibrering (ArUco)</span>
-      <span id="calib-toggle-arrow">▲</span>
-    </button>
-    <div class="calib-body open" id="calib-body">
-      <div class="calib-preview-wrap">
-        <img id="calib-img" src="" alt="Markør-preview">
+<!-- Kalibrering tab -->
+<div class="tab-content" id="tab-kalibrering">
+  <div style="display:flex;gap:12px;padding:12px;align-items:flex-start;flex-wrap:wrap">
+
+    <!-- Left: ArUco calibration -->
+    <div class="calib-panel" style="flex:1;min-width:280px;margin:0">
+      <div style="background:#252840;padding:8px 14px;font-size:12px;font-weight:600;color:#94a3b8;
+                  text-transform:uppercase;letter-spacing:.08em">
+        Kalibrering (ArUco)
       </div>
-      <div class="calib-controls">
+      <div style="padding:14px;display:flex;flex-direction:column;gap:10px">
         <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#64748b">
           Markørstatus
         </label>
@@ -520,10 +644,63 @@
         <button class="btn btn-primary" id="btn-calib" onclick="runCalibration()" style="width:100%">
           Kalibrer nå
         </button>
-        <div id="calib-result">Åpne panelet for å sjekke markørstatus.</div>
+        <div id="calib-result">Kontrollerer markørstatus…</div>
       </div>
     </div>
+
+    <!-- Right: Coordinate verification -->
+    <div class="calib-panel" style="flex:1;min-width:240px;margin:0">
+      <div style="background:#252840;padding:8px 14px;font-size:12px;font-weight:600;color:#94a3b8;
+                  text-transform:uppercase;letter-spacing:.08em">
+        Verifiser kalibrering
+      </div>
+      <div style="padding:14px;display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:12px;color:#94a3b8">
+          Klikk i live-bildet for å se hvilke robot-koordinater punktet tilsvarer.
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:11px;color:#64748b">Z-høyde (mm):</span>
+          <input id="verify-z" type="number" value="50" step="5" style="width:70px;box-sizing:border-box">
+        </div>
+        <div id="verify-coords" style="font-size:13px;font-weight:600;color:#e2e8f0;min-height:20px"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-neutral" id="btn-verify-toggle" onclick="toggleVerify()" style="flex:1">
+            Aktiver klikk-verifisering
+          </button>
+          <button class="btn btn-primary" id="btn-verify-move" onclick="moveToVerified()"
+                  style="flex:1;display:none" disabled>Flytt robot hit</button>
+        </div>
+      </div>
+    </div>
+
   </div>
+
+  <!-- Camera feed — full width below the two panels -->
+  <div class="calib-panel" style="margin:0 12px 12px;display:flex;flex-direction:column;overflow:hidden">
+    <div style="background:#252840;padding:8px 14px;font-size:12px;font-weight:600;color:#94a3b8;
+                text-transform:uppercase;letter-spacing:.08em">
+      Kamera (ArUco preview)
+    </div>
+    <div style="flex:1;background:#0a0c14;display:flex;align-items:center;justify-content:center;
+                min-height:520px;position:relative">
+      <img id="calib-img" src="" alt="Markør-preview"
+           style="max-width:100%;max-height:100%;width:100%;object-fit:contain;display:block"
+           onclick="liveImgClick(event)">
+    </div>
+  </div>
+
+</div><!-- /tab-kalibrering -->
+
+<!-- Debug tab -->
+<div class="tab-content" id="tab-debug">
+  <div class="console-panel">
+    <div class="console-panel-header">
+      <span>🖥 Debug-konsoll</span>
+      <button id="console-clear" onclick="clearConsole()">Tøm</button>
+    </div>
+    <div class="console-body" id="console-body"></div>
+  </div>
+</div><!-- /tab-debug -->
 
 <footer>
   <span id="status-text">Initialiserer…</span>
@@ -539,6 +716,8 @@
   let destMode        = false;
   let robotConnected  = false;
   let robotBusy       = false;
+  let verifyMode     = false;
+  let verifiedCoords = null;
 
   // ── API helpers ───────────────────────────────────────────────────────────
   async function post(url, body = {}) {
@@ -548,6 +727,22 @@
       body: JSON.stringify(body),
     });
     return r.json();
+  }
+
+  // ── Tab switching ─────────────────────────────────────────────────────────
+  function switchTab(name, btn) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    btn.classList.add('active');
+  }
+
+  // ── Manual jog toggle ─────────────────────────────────────────────────────
+  function toggleJog(btn) {
+    const panel = document.getElementById('jog-panel');
+    const open = !panel.classList.contains('open');
+    panel.classList.toggle('open', open);
+    btn.textContent = open ? 'Manuell kjøring ▲' : 'Manuell kjøring ▼';
   }
 
   // ── Analyze ───────────────────────────────────────────────────────────────
@@ -591,20 +786,25 @@
       const nx  = Math.round((box[1] + box[3]) / 2);
       const ny  = Math.round((box[0] + box[2]) / 2);
       const safeLabel = (d.label || '?').replace(/'/g, "\\'");
+      const posText = (d.rx_mm !== undefined)
+        ? `X=${d.rx_mm}mm Y=${d.ry_mm}mm`
+        : `${nx} / ${ny}`;
+      const rxArg = d.rx_mm !== undefined ? d.rx_mm : 'null';
+      const ryArg = d.ry_mm !== undefined ? d.ry_mm : 'null';
       const li = document.createElement('li');
       li.dataset.idx = i;
       li.innerHTML = `
         <span class="det-label">${i + 1}. ${d.label || '?'}</span>
-        <span class="det-pos">X=${nx} Y=${ny}</span>
-        <button class="btn-pick-select" onclick="selectObject(${i},'${safeLabel}',${ny},${nx})">Velg</button>`;
+        <span class="det-pos">${posText}</span>
+        <button class="btn-pick-select" onclick="selectObject(${i},'${safeLabel}',${ny},${nx},${rxArg},${ryArg})">Velg</button>`;
       ul.appendChild(li);
     });
     updatePickPlaceButtons();
   }
 
   // ── Object selection ──────────────────────────────────────────────────────
-  function selectObject(idx, label, ny, nx) {
-    selectedObject = { idx, label, ny, nx };
+  function selectObject(idx, label, ny, nx, rx_mm, ry_mm) {
+    selectedObject = { idx, label, ny, nx, rx_mm, ry_mm };
     document.querySelectorAll('#detection-list li').forEach((li, i) => {
       li.classList.toggle('selected', i === idx);
     });
@@ -645,18 +845,34 @@
     btn.style.color      = '';
     document.getElementById('capture-img-wrapper').classList.remove('dest-mode');
 
-    updatePickPlaceSummary();
-    updatePickPlaceButtons();
+    // Fetch robot mm coords for destination, then update summary
+    post('/api/preview_coords', { ny, nx, topdown: true }).then(data => {
+      if (data.rx_mm !== undefined) {
+        destinationPoint.rx_mm = data.rx_mm;
+        destinationPoint.ry_mm = data.ry_mm;
+      }
+      updatePickPlaceSummary();
+      updatePickPlaceButtons();
+    }).catch(() => {
+      updatePickPlaceSummary();
+      updatePickPlaceButtons();
+    });
   }
 
   // ── Pick & Place UI helpers ───────────────────────────────────────────────
   function updatePickPlaceSummary() {
     const el = document.getElementById('pickplace-summary');
-    const pickTxt  = selectedObject
-      ? `<span class="pp-pick">Henter: ${selectedObject.label}</span>`
+    const pickCoord = selectedObject && selectedObject.rx_mm != null
+      ? ` (X=${selectedObject.rx_mm}mm, Y=${selectedObject.ry_mm}mm, Z=100→10mm)`
+      : selectedObject ? ` (grid ${selectedObject.nx}/${selectedObject.ny})` : '';
+    const pickTxt = selectedObject
+      ? `<span class="pp-pick">Henter: ${selectedObject.label}${pickCoord}</span>`
       : '<span style="color:#475569">Ingen objekt valgt</span>';
+    const placeCoord = destinationPoint && destinationPoint.rx_mm != null
+      ? `X=${destinationPoint.rx_mm}mm, Y=${destinationPoint.ry_mm}mm, Z=100→10mm`
+      : destinationPoint ? `grid ${destinationPoint.nx}/${destinationPoint.ny}` : '';
     const placeTxt = destinationPoint
-      ? `<span class="pp-place">Til: X=${destinationPoint.nx} Y=${destinationPoint.ny}</span>`
+      ? `<span class="pp-place">Til: ${placeCoord}</span>`
       : '<span style="color:#475569">Ingen destinasjon satt</span>';
     el.innerHTML = pickTxt + ' &nbsp;→&nbsp; ' + placeTxt;
   }
@@ -711,13 +927,17 @@
       const data = await post('/api/robot/connect');
       if (data.error) {
         setStatus('Robot-tilkoblingsfeil: ' + data.error);
+        document.getElementById('btn-robot-connect').disabled = false;
+      } else if (data.connecting) {
+        setStatus('Kobler til robot… (sjekk status-feltet)');
+        // Connection runs in background — pollStatus() every 1.5 s will update UI
       } else {
         setStatus('Robot tilkoblet.');
         await pollStatus();
+        document.getElementById('btn-robot-connect').disabled = false;
       }
     } catch (e) {
       setStatus('Nettverksfeil: ' + e.message);
-    } finally {
       document.getElementById('btn-robot-connect').disabled = false;
     }
   }
@@ -727,10 +947,84 @@
     await pollStatus();
   }
 
+  async function robotStop() {
+    await post('/api/robot/stop');
+    await pollStatus();
+  }
+
+  async function jogRobot() {
+    const coords = {
+      x:  parseFloat(document.getElementById('jog-x').value)  || 0,
+      y:  parseFloat(document.getElementById('jog-y').value)  || 0,
+      z:  parseFloat(document.getElementById('jog-z').value)  || 0,
+      rx: parseFloat(document.getElementById('jog-rx').value) || 0,
+      ry: parseFloat(document.getElementById('jog-ry').value) || 0,
+      rz: parseFloat(document.getElementById('jog-rz').value) || 0,
+    };
+    setStatus(`Kjører til X=${coords.x} Y=${coords.y} Z=${coords.z}…`);
+    let data;
+    try { data = await post('/api/robot/move', coords); }
+    catch (e) { setStatus('Nettverksfeil: ' + e.message); return; }
+    if (data.error) setStatus('Kjøringsfeil: ' + data.error);
+    else setStatus('Posisjon nådd.');
+  }
+
+  // ── Kalibrering verifisering ──────────────────────────────────────────────
+  function toggleVerify() {
+    verifyMode = !verifyMode;
+    verifiedCoords = null;
+    document.getElementById('verify-coords').textContent = '';
+    document.getElementById('btn-verify-move').style.display = 'none';
+    document.getElementById('live-img').style.cursor = verifyMode ? 'crosshair' : 'default';
+    document.getElementById('btn-verify-toggle').textContent =
+      verifyMode ? 'Deaktiver klikk-verifisering' : 'Aktiver klikk-verifisering';
+  }
+
+  async function moveToVerified() {
+    if (!verifiedCoords) return;
+    const z = parseFloat(document.getElementById('verify-z').value) || 50;
+    const data = await post('/api/robot/move', {
+      x: verifiedCoords.rx_mm, y: verifiedCoords.ry_mm, z, rx: 0, ry: 0, rz: 0
+    });
+    if (data.error) setStatus('Feil: ' + data.error);
+    else setStatus(`Robot flyttes til X=${verifiedCoords.rx_mm}mm Y=${verifiedCoords.ry_mm}mm`);
+  }
+
+  function liveImgClick(e) {
+    if (!verifyMode) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const offX = e.clientX - rect.left;
+    const offY = e.clientY - rect.top;
+    const ny = Math.round(offY / rect.height * 1000);
+    const nx = Math.round(offX / rect.width  * 1000);
+    const isTopdown = e.currentTarget.id === 'calib-img';
+
+    const dot = document.createElement('div');
+    dot.style.cssText = `position:absolute;width:12px;height:12px;border-radius:50%;
+      background:rgba(255,80,80,0.85);border:2px solid white;pointer-events:none;
+      left:${offX - 6}px;top:${offY - 6}px;z-index:10;`;
+    e.currentTarget.parentElement.appendChild(dot);
+    setTimeout(() => dot.remove(), 30000);
+
+    post('/api/preview_coords', { ny, nx, topdown: isTopdown }).then(data => {
+      if (!data.calibrated) {
+        document.getElementById('verify-coords').textContent = 'Ikke kalibrert ennå.';
+        return;
+      }
+      verifiedCoords = { rx_mm: data.rx_mm, ry_mm: data.ry_mm };
+      document.getElementById('verify-coords').textContent =
+        `Klikket punkt: X=${data.rx_mm}mm  Y=${data.ry_mm}mm`;
+      const btnMove = document.getElementById('btn-verify-move');
+      btnMove.style.display = '';
+      btnMove.disabled = !robotConnected;
+    });
+  }
+
   function updateRobotChip(connected, busy) {
     const chip = document.getElementById('robot-chip');
     const btnC = document.getElementById('btn-robot-connect');
     const btnD = document.getElementById('btn-robot-disconnect');
+    const btnS = document.getElementById('btn-robot-stop');
     if (connected && busy) {
       chip.className = 'robot-chip busy';
       chip.textContent = '⬤ Kjører…';
@@ -742,7 +1036,10 @@
       chip.textContent = '⬤ Frakoblet';
     }
     btnC.style.display = connected ? 'none' : '';
+    btnC.disabled      = !connected && busy;   // grey out while connecting
     btnD.style.display = connected ? ''     : 'none';
+    btnS.style.display = (connected && busy) ? '' : 'none';
+    document.getElementById('btn-jog').disabled = !(connected && !busy);
   }
 
   // ── UI helpers ────────────────────────────────────────────────────────────
@@ -772,6 +1069,7 @@
       updateRobotChip(robotConnected, robotBusy);
       updatePickPlaceButtons();
       updateMicButton();
+      updateAssistantButtons();
     } catch (_) {
       setDot('error');
       setStatus('Kan ikke nå serveren.');
@@ -785,8 +1083,51 @@
       now.toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
+  // ── Camera selector ───────────────────────────────────────────────────────
+  async function fetchCameras() {
+    try {
+      const data = await fetch('/api/cameras').then(r => r.json());
+      const sel = document.getElementById('camera-select');
+      sel.innerHTML = '';
+      if (!data.cameras || !data.cameras.length) {
+        sel.innerHTML = '<option value="">Ingen kameraer</option>';
+        return;
+      }
+      data.cameras.forEach(cam => {
+        const opt = document.createElement('option');
+        opt.value = cam.index;
+        opt.textContent = cam.label;
+        if (cam.index === data.current) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    } catch (_) {}
+  }
+
+  async function selectCamera(idx) {
+    if (idx === '') return;
+    setStatus(`Bytter til kamera ${idx}…`);
+    try {
+      const data = await post('/api/cameras/select', { index: parseInt(idx) });
+      if (data.error) setStatus('Kamera-feil: ' + data.error);
+      else { setStatus(`Kamera ${idx} aktivt.`); fetchCameras(); }
+    } catch (e) {
+      setStatus('Nettverksfeil: ' + e.message);
+    }
+  }
+
+  async function reconnectCamera() {
+    setStatus('Kobler til kamera på nytt…');
+    try {
+      const data = await post('/api/cameras/reconnect');
+      if (data.error) setStatus('Kamera-feil: ' + data.error);
+      else { setStatus(`Kamera ${data.index} tilkoblet på nytt.`); fetchCameras(); }
+    } catch (e) {
+      setStatus('Nettverksfeil: ' + e.message);
+    }
+  }
+
   // ── Calibration overlay toggle ────────────────────────────────────────────
-  let overlayOn = false;
+  let overlayOn = true;
   async function toggleCalibOverlay() {
     const data = await post('/api/calibrate/overlay');
     overlayOn = data.overlay;
@@ -798,7 +1139,7 @@
   }
 
   // ── Workspace mask toggle ─────────────────────────────────────────────────
-  let maskOn = false;
+  let maskOn = true;
   async function toggleWorkspaceMask() {
     const data = await post('/api/workspace/toggle');
     maskOn = data.mask;
@@ -809,22 +1150,7 @@
     btn.style.borderColor = maskOn ? '#78350f'     : '#334155';
   }
 
-  // ── Calibration panel ─────────────────────────────────────────────────────
-  let calibOpen = true;
-  let calibPollTimer = null;
-
-  function toggleCalib(btn) {
-    calibOpen = !calibOpen;
-    document.getElementById('calib-body').classList.toggle('open', calibOpen);
-    document.getElementById('calib-toggle-arrow').textContent = calibOpen ? '▲' : '▼';
-    if (calibOpen) {
-      refreshCalibPreview();
-      calibPollTimer = setInterval(() => { refreshCalibPreview(); pollCalibStatus(); }, 1000);
-    } else {
-      clearInterval(calibPollTimer);
-    }
-  }
-
+  // ── ArUco calibration ─────────────────────────────────────────────────────
   function refreshCalibPreview() {
     const img = document.getElementById('calib-img');
     img.src = '/api/calibrate/preview?v=' + Date.now();
@@ -910,17 +1236,35 @@
     };
     speechRec.onresult = async e => {
       const text = e.results[0][0].transcript;
-      document.getElementById('speech-text').textContent = '«' + text + '»';
-      setStatus('Sender kommando til agent…');
-      try {
-        const data = await post('/api/assistant/command', { text });
-        if (data.error) setStatus('Feil: ' + data.error);
-        else setStatus('Agent startet: «' + text + '»');
-      } catch (err) {
-        setStatus('Nettverksfeil: ' + err.message);
-      }
+      document.getElementById('assistant-input').value = text;
+      sendAssistantPrompt();
     };
     speechRec.start();
+  }
+
+  async function sendAssistantPrompt() {
+    const input = document.getElementById('assistant-input');
+    const text  = input.value.trim();
+    if (!text) return;
+    const statusEl = document.getElementById('assistant-status');
+    statusEl.textContent = 'Sender til agent…';
+    document.getElementById('btn-assistant-send').disabled = true;
+    try {
+      const data = await post('/api/assistant/command', { text });
+      if (data.error) {
+        statusEl.style.color = '#f87171';
+        statusEl.textContent = 'Feil: ' + data.error;
+      } else {
+        statusEl.style.color = '#94a3b8';
+        statusEl.textContent = 'Agent startet: «' + text + '»';
+        input.value = '';
+      }
+    } catch (err) {
+      statusEl.style.color = '#f87171';
+      statusEl.textContent = 'Nettverksfeil: ' + err.message;
+    } finally {
+      updateAssistantButtons();
+    }
   }
 
   function updateMicButton() {
@@ -931,15 +1275,82 @@
                :                  'Si en kommando (no-NO)';
   }
 
+  function updateAssistantButtons() {
+    const busy = !robotConnected || robotBusy;
+    document.getElementById('btn-assistant-send').disabled = busy;
+    document.getElementById('btn-mic').disabled = busy;
+  }
+
+  // ── Debug console ─────────────────────────────────────────────────────────
+  let logSeenCount = 0;
+
+  function clearConsole() {
+    document.getElementById('console-body').innerHTML = '';
+  }
+
+  function scrollConsole() {
+    const body = document.getElementById('console-body');
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function appendLog(entry) {
+    const body = document.getElementById('console-body');
+    const div = document.createElement('div');
+    div.className = 'log-line log-' + (entry.level || 'info');
+    const tag = { info: 'INFO', warning: 'WARN', error: 'ERR', js: 'JS' }[entry.level] || 'INFO';
+    div.innerHTML =
+      `<span class="log-ts">${entry.ts}</span>` +
+      `<span class="log-tag">[${tag}]</span>` +
+      `<span class="log-msg">${escHtml(entry.msg)}</span>`;
+    body.appendChild(div);
+    scrollConsole();
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function logJs(msg, level = 'js') {
+    const ts = new Date().toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    appendLog({ ts, level, msg });
+  }
+
+  async function pollLogs() {
+    try {
+      const data = await fetch('/api/logs?since=' + logSeenCount).then(r => r.json());
+      (data.entries || []).forEach(e => appendLog(e));
+      logSeenCount = data.total || logSeenCount;
+    } catch (_) {}
+  }
+
+  // Intercept JS errors into the console
+  window.addEventListener('error', e => {
+    logJs(`Uncaught: ${e.message} (${e.filename}:${e.lineno})`, 'error');
+  });
+  window.addEventListener('unhandledrejection', e => {
+    logJs(`UnhandledPromise: ${e.reason}`, 'error');
+  });
+
+  // Wrap robotConnect to also log JS-side
+  const _origRobotConnect = robotConnect;
+  robotConnect = async function() {
+    logJs('Klikket "Koble til robot" – sender POST /api/robot/connect');
+    await _origRobotConnect();
+  };
+
   // ── Boot ──────────────────────────────────────────────────────────────────
   setInterval(pollStatus, 1500);
   setInterval(updateClock, 1000);
+  setInterval(pollLogs, 1500);
+  setInterval(() => { refreshCalibPreview(); pollCalibStatus(); }, 1000);
   pollStatus();
   updateClock();
-  // Calibration panel starts open
+  pollLogs();
   refreshCalibPreview();
   pollCalibStatus();
-  calibPollTimer = setInterval(() => { refreshCalibPreview(); pollCalibStatus(); }, 1000);
+  fetchCameras();
 </script>
 </body>
 </html>
