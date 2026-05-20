@@ -640,6 +640,7 @@
                 style="padding:7px 10px;border-radius:6px;border:1px solid #334155;
                        background:#1e2235;color:#e2e8f0;cursor:pointer">🎤</button>
       </div>
+      <div id="speech-text"></div>
       <div id="assistant-status" style="font-size:12px;color:#94a3b8;margin-top:4px;min-height:16px"></div>
     </div>
 
@@ -1342,6 +1343,11 @@
   let speechRec = null;
   let speechListening = false;
 
+  function setSpeechText(text) {
+    const el = document.getElementById('speech-text');
+    if (el) el.textContent = text;
+  }
+
   function toggleSpeech() {
     if (speechListening) {
       if (speechRec) speechRec.stop();
@@ -1349,17 +1355,19 @@
     }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
+      setSpeechText('Nettleseren støtter ikke talegjenkjenning.');
       setStatus('Nettleseren støtter ikke talegjenkjenning (prøv Chrome/Edge).');
       return;
     }
     speechRec = new SR();
     speechRec.lang = 'no-NO';
     speechRec.interimResults = false;
+    speechRec.continuous = false;
 
     speechRec.onstart = () => {
       speechListening = true;
       document.getElementById('btn-mic').classList.add('listening');
-      document.getElementById('speech-text').textContent = 'Lytter…';
+      setSpeechText('Lytter…');
     };
     speechRec.onend = () => {
       speechListening = false;
@@ -1368,14 +1376,19 @@
     speechRec.onerror = e => {
       speechListening = false;
       document.getElementById('btn-mic').classList.remove('listening');
-      document.getElementById('speech-text').textContent = 'Feil: ' + e.error;
+      setSpeechText('Feil: ' + e.error);
     };
     speechRec.onresult = async e => {
       const text = e.results[0][0].transcript;
       document.getElementById('assistant-input').value = text;
+      setSpeechText('Hørte: ' + text);
       sendAssistantPrompt();
     };
-    speechRec.start();
+    try {
+      speechRec.start();
+    } catch (e) {
+      setSpeechText('Kunne ikke starte mikrofon: ' + e.message);
+    }
   }
 
   async function sendAssistantPrompt() {

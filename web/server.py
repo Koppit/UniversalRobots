@@ -95,6 +95,62 @@ _robot_tools = None    # RobotActionTools instance
 _robot_busy = False
 
 
+def _start_robot_connect() -> tuple[dict, int]:
+    global _robot, _robot_tools, _status_msg, _robot_busy
+    if _robot is not None and getattr(_robot, 'connected', False):
+        _log("info", "Robot allerede tilkoblet.")
+        return {"connected": True}, 200
+    if _robot_busy:
+        return {"error": "Robot er opptatt"}, 409
+
+    def _do_connect():
+        global _robot, _robot_tools, _status_msg, _robot_busy
+        _robot_busy = True
+        try:
+            from robot.ur3_controller import UR3Controller
+            from tools.robot_tools import RobotActionTools
+            robot_ip = os.environ.get("ROBOT_IP", "192.168.0.25")
+            _status_msg = f"Sjekker nettverkstilgang til {robot_ip}…"
+            _log("info", _status_msg)
+            try:
+                with socket.create_connection((robot_ip, 30004), timeout=4):
+                    pass
+            except OSError as e:
+                _log("error", f"Robot ikke nåbar på {robot_ip}:30004 — {e}")
+                _status_msg = f"FEIL: Robot ikke nåbar ({robot_ip}). Er roboten på og koblet til nettverket?"
+                return
+            _log("info", f"Nettverkstilgang OK. Kobler til RTDE på {robot_ip}…")
+            _status_msg = f"Kobler til robot på {robot_ip}…"
+            robot = UR3Controller(robot_ip)
+            if not robot.connect():
+                _log("error", "Tilkobling mislyktes.")
+                _status_msg = "FEIL: Tilkobling til robot mislyktes."
+                return
+            robot.set_workspace_limits(x=(-1.5, 1.5), y=(-1.5, 0.1), z=(-1.10, 1.55))
+            robot_tools = RobotActionTools(robot, _homography, logger=_log)
+            _log("info", "TCP-tilkobling OK. Kjører robot til hjemposisjon før griper aktiveres…")
+            _status_msg = "Kjører robot til hjemposisjon…"
+            robot_tools.go_home()
+            _log("info", "Robot i hjemposisjon. Aktiverer griper…")
+            _status_msg = "Aktiverer griper (5 s)…"
+            robot.gripper.activate()
+            robot.release_object()
+            _robot = robot
+            _robot_tools = robot_tools
+            _log("info", "Robot tilkoblet og klar.")
+            _status_msg = "Robot tilkoblet."
+        except BaseException as exc:
+            import traceback
+            _log("error", f"Tilkoblingsfeil: {exc}\n{traceback.format_exc()}")
+            _status_msg = f"Tilkoblingsfeil: {exc}"
+        finally:
+            _robot_busy = False
+
+    threading.Thread(target=_do_connect, daemon=True).start()
+    _status_msg = "Kobler til robot…"
+    return {"connecting": True}, 200
+
+
 
 # ---------------------------------------------------------------------------
 # Init (called at startup)
@@ -167,6 +223,8 @@ def _init():
             _log("warning", "Kamera OK, men GEMINI_API_KEY mangler.")
             _status_msg = "Klar – GEMINI_API_KEY mangler!"
         threading.Thread(target=_auto_calibrate, daemon=True).start()
+        _log("info", "Kamera tilkoblet – starter automatisk robottilkobling…")
+        _start_robot_connect()
     else:
         _log("error", "Kamera ikke funnet.")
         _status_msg = "FEIL: Kamera ikke funnet."
@@ -417,59 +475,8 @@ def api_cameras_reconnect():
 # ---------------------------------------------------------------------------
 @app.route("/api/robot/connect", methods=["POST"])
 def robot_connect():
-    global _robot, _robot_tools, _status_msg, _robot_busy
-    if _robot is not None and getattr(_robot, 'connected', False):
-        _log("info", "Robot allerede tilkoblet.")
-        return jsonify({"connected": True})
-    if _robot_busy:
-        return jsonify({"error": "Robot er opptatt"}), 409
-
-    def _do_connect():
-        global _robot, _robot_tools, _status_msg, _robot_busy
-        _robot_busy = True
-        try:
-            from robot.ur3_controller import UR3Controller
-            from tools.robot_tools import RobotActionTools
-            robot_ip = os.environ.get("ROBOT_IP", "192.168.0.25")
-            _status_msg = f"Sjekker nettverkstilgang til {robot_ip}…"
-            _log("info", _status_msg)
-            try:
-                with socket.create_connection((robot_ip, 30004), timeout=4):
-                    pass
-            except OSError as e:
-                _log("error", f"Robot ikke nåbar på {robot_ip}:30004 — {e}")
-                _status_msg = f"FEIL: Robot ikke nåbar ({robot_ip}). Er roboten på og koblet til nettverket?"
-                return
-            _log("info", f"Nettverkstilgang OK. Kobler til RTDE på {robot_ip}…")
-            _status_msg = f"Kobler til robot på {robot_ip}…"
-            robot = UR3Controller(robot_ip)
-            if not robot.connect():
-                _log("error", "Tilkobling mislyktes.")
-                _status_msg = "FEIL: Tilkobling til robot mislyktes."
-                return
-            robot.set_workspace_limits(x=(-1.5, 1.5), y=(-1.5, 0.1), z=(-1.10, 1.55))
-            robot_tools = RobotActionTools(robot, _homography, logger=_log)
-            _log("info", "TCP-tilkobling OK. Kjører robot til hjemposisjon før griper aktiveres…")
-            _status_msg = "Kjører robot til hjemposisjon…"
-            robot_tools.go_home()
-            _log("info", "Robot i hjemposisjon. Aktiverer griper…")
-            _status_msg = "Aktiverer griper (5 s)…"
-            robot.gripper.activate()
-            robot.release_object()
-            _robot = robot
-            _robot_tools = robot_tools
-            _log("info", "Robot tilkoblet og klar.")
-            _status_msg = "Robot tilkoblet."
-        except BaseException as exc:
-            import traceback
-            _log("error", f"Tilkoblingsfeil: {exc}\n{traceback.format_exc()}")
-            _status_msg = f"Tilkoblingsfeil: {exc}"
-        finally:
-            _robot_busy = False
-
-    threading.Thread(target=_do_connect, daemon=True).start()
-    _status_msg = "Kobler til robot…"
-    return jsonify({"connecting": True})
+    payload, status = _start_robot_connect()
+    return jsonify(payload), status
 
 
 @app.route("/api/robot/disconnect", methods=["POST"])
