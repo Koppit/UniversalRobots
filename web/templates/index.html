@@ -783,30 +783,42 @@
     ul.innerHTML = '';
     dets.forEach((d, i) => {
       const box = d.box_2d || [0, 0, 0, 0];
-      const nx  = Math.round((box[1] + box[3]) / 2);
-      const ny  = Math.round((box[0] + box[2]) / 2);
-      const safeLabel = (d.label || '?').replace(/'/g, "\\'");
+      const nx  = d.pick_nx !== undefined ? d.pick_nx : Math.round((box[1] + box[3]) / 2);
+      const ny  = d.pick_ny !== undefined ? d.pick_ny : Math.round((box[0] + box[2]) / 2);
       const posText = (d.rx_mm !== undefined)
-        ? `X=${d.rx_mm}mm Y=${d.ry_mm}mm`
-        : `${nx} / ${ny}`;
-      const rxArg = d.rx_mm !== undefined ? d.rx_mm : 'null';
-      const ryArg = d.ry_mm !== undefined ? d.ry_mm : 'null';
-      const angleArg = d.angle_deg !== undefined ? d.angle_deg : 'null';
-      const angleText = d.angle_deg !== undefined ? ` RZ=${d.angle_deg}°` : '';
+        ? `Pick X=${d.rx_mm}mm Y=${d.ry_mm}mm`
+        : `Pick ${nx} / ${ny}`;
+      const angleText = d.angle_deg !== undefined && d.angle_deg !== null
+        ? ` Obj=${d.angle_deg}°`
+        : '';
+      const yawText = d.pick_yaw_deg !== undefined && d.pick_yaw_deg !== null
+        ? ` Grip=${d.pick_yaw_deg}°`
+        : '';
       const li = document.createElement('li');
       li.dataset.idx = i;
       li.innerHTML = `
         <span class="det-label">${i + 1}. ${d.label || '?'}</span>
-        <span class="det-pos">${posText}${angleText}</span>
-        <button class="btn-pick-select" onclick="selectObject(${i},'${safeLabel}',${ny},${nx},${rxArg},${ryArg},${angleArg})">Velg</button>`;
+        <span class="det-pos">${posText}${angleText}${yawText}</span>
+        <button class="btn-pick-select" onclick="selectObject(${i})">Velg</button>`;
       ul.appendChild(li);
     });
     updatePickPlaceButtons();
   }
 
   // ── Object selection ──────────────────────────────────────────────────────
-  function selectObject(idx, label, ny, nx, rx_mm, ry_mm, angle_deg) {
-    selectedObject = { idx, label, ny, nx, rx_mm, ry_mm, angle_deg };
+  function selectObject(idx) {
+    const d = lastDetections[idx] || {};
+    const box = d.box_2d || [0, 0, 0, 0];
+    selectedObject = {
+      idx,
+      label: d.label || '?',
+      ny: d.pick_ny !== undefined ? d.pick_ny : Math.round((box[0] + box[2]) / 2),
+      nx: d.pick_nx !== undefined ? d.pick_nx : Math.round((box[1] + box[3]) / 2),
+      rx_mm: d.rx_mm !== undefined ? d.rx_mm : null,
+      ry_mm: d.ry_mm !== undefined ? d.ry_mm : null,
+      angle_deg: d.angle_deg !== undefined ? d.angle_deg : null,
+      pick_yaw_deg: d.pick_yaw_deg !== undefined ? d.pick_yaw_deg : null,
+    };
     document.querySelectorAll('#detection-list li').forEach((li, i) => {
       li.classList.toggle('selected', i === idx);
     });
@@ -868,10 +880,13 @@
       ? ` (X=${selectedObject.rx_mm}mm, Y=${selectedObject.ry_mm}mm, Z=100→10mm)`
       : selectedObject ? ` (grid ${selectedObject.nx}/${selectedObject.ny})` : '';
     const pickAngle = selectedObject && selectedObject.angle_deg != null
-      ? ` RZ=${selectedObject.angle_deg}°`
+      ? ` Obj=${selectedObject.angle_deg}°`
+      : '';
+    const pickYaw = selectedObject && selectedObject.pick_yaw_deg != null
+      ? ` Grip=${selectedObject.pick_yaw_deg}°`
       : '';
     const pickTxt = selectedObject
-      ? `<span class="pp-pick">Henter: ${selectedObject.label}${pickCoord}${pickAngle}</span>`
+      ? `<span class="pp-pick">Henter: ${selectedObject.label}${pickCoord}${pickAngle}${pickYaw}</span>`
       : '<span style="color:#475569">Ingen objekt valgt</span>';
     const placeCoord = destinationPoint && destinationPoint.rx_mm != null
       ? `X=${destinationPoint.rx_mm}mm, Y=${destinationPoint.ry_mm}mm, Z=100→10mm`

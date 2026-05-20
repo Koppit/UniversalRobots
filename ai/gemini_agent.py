@@ -9,10 +9,22 @@ from google.genai import types
 DETECT_PROMPT = """\
 Identify the object(s) relevant to the following task: {task}
 
-Point to no more than 5 objects in the image.
+For each object, choose the best top-down pickup point and object yaw for a
+parallel two-finger gripper with a maximum 50 mm opening.
+Prefer a stable grasp across the narrowest practical dimension of the object,
+near its center of mass, avoiding edges, holes, reflective glare, and nearby
+obstacles. If the object is wider than 50 mm, choose the best graspable narrow
+part or a stable edge/handle contact point.
+Report the object's grasp axis angle; the robot applies a 90 degree gripper
+offset while picking so the fingers close across the object.
+
+Point to no more than 5 objects in the image, sorted by relevance.
 Return ONLY valid JSON in this exact format:
-[{{"point": [y, x], "label": "<object name>"}}]
-Points are [y, x] normalized to 0-1000. No other text.
+[{{"grasp_point": [y, x], "object_angle_deg": 0, "label": "<object name>"}}]
+grasp_point is [y, x] normalized to 0-1000.
+object_angle_deg is the top-down angle in degrees of the object's grasp axis
+at the pickup point, in image coordinates, normalized to the range -90 to 90.
+No other text.
 """
 
 # Norske og engelske nøkkelord for plukk- og plasser-operasjoner
@@ -48,13 +60,20 @@ class GeminiAgent:
             return f"Ingen objekter gjenkjent. Råsvar: {response.text}"
 
         obj = detections[0]
-        ny, nx = int(obj["point"][0]), int(obj["point"][1])
+        point = obj.get("grasp_point") or obj.get("point")
+        if not point or len(point) != 2:
+            return f"Ingen gyldig gripepunkt funnet. Råsvar: {response.text}"
+        ny, nx = int(point[0]), int(point[1])
         label = obj.get("label", "objekt")
+        angle_deg = self._parse_angle(
+            obj.get("object_angle_deg", obj.get("gripper_angle_deg"))
+        )
 
         task_lower = task.lower()
         if any(w in task_lower for w in PICK_KEYWORDS):
-            self._pick_fn(ny, nx)
-            return f"Plukket opp '{label}' (Y={ny}, X={nx})."
+            self._pick_fn(ny, nx, angle_deg)
+            angle_text = f", object_angle={angle_deg:.1f}°" if angle_deg is not None else ""
+            return f"Plukket opp '{label}' (Y={ny}, X={nx}{angle_text})."
         elif any(w in task_lower for w in PLACE_KEYWORDS):
             self._place_fn(ny, nx)
             return f"Plasserte ved '{label}' (Y={ny}, X={nx})."
@@ -72,3 +91,11 @@ class GeminiAgent:
             except json.JSONDecodeError:
                 pass
         return []
+
+    @staticmethod
+    def _parse_angle(value) -> float | None:
+        try:
+            angle = float(value)
+        except (TypeError, ValueError):
+            return None
+        return max(-90.0, min(90.0, angle))

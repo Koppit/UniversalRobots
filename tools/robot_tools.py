@@ -18,7 +18,7 @@ class RobotActionTools:
     z_home_mm = 200
 
     _ROTATION = [0.0, 0.0, 0.0]  # RX=0 RY=0 RZ=0 — verktøy peker rett ned
-    gripper_yaw_offset_deg = 90.0  # counter-clockwise correction for gripper mounting
+    gripper_yaw_offset_deg = -90.0  # pick yaw offset so fingers close across the object
 
     def __init__(self, robot_controller, coordinate_converter, logger=None):
         self.robot = robot_controller
@@ -42,6 +42,11 @@ class RobotActionTools:
         if yaw_deg is not None:
             rotation[2] += math.radians(yaw_deg + self.gripper_yaw_offset_deg)
         return rotation
+
+    def _pick_yaw_deg(self, object_yaw_deg: float | None = None) -> float | None:
+        if object_yaw_deg is None:
+            return None
+        return object_yaw_deg + self.gripper_yaw_offset_deg
 
     def _go_home(self):
         """Beveger armen til hjemposisjon (X=0, Y=50mm, Z=200mm over bordet)."""
@@ -77,9 +82,11 @@ class RobotActionTools:
     def pick_object_at(self, normalized_y: int, normalized_x: int, angle_deg: float | None = None):
         """Utfører full pick-operasjon: hover → åpne → ned → klem → opp."""
         rx, ry = self.homography.gemini_to_robot(normalized_y, normalized_x)
+        pick_yaw = self._pick_yaw_deg(angle_deg)
         self._log("info", f"[Tools] pick_object_at  ny={normalized_y} nx={normalized_x}"
                            f" → X={rx*1000:+.1f}mm Y={ry*1000:+.1f}mm"
-                           f" RZ={angle_deg if angle_deg is not None else 0:.1f}°")
+                           f" object_angle={angle_deg if angle_deg is not None else 0:.1f}°"
+                           f" pick_yaw={pick_yaw if pick_yaw is not None else 0:.1f}°")
 
         self._lift_to_hover()
         self._move("1/5 hover     ", rx, ry, self.z_height_hover_mm, angle_deg)

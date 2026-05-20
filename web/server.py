@@ -263,10 +263,30 @@ def analyze():
         detections = detect_objects(_client, gemini_frame)
         for det in detections:
             box = det.get("box_2d")
+            angle = None
             if box and len(box) == 4:
                 angle = estimate_object_angle(gemini_frame, box)
-                if angle is not None:
-                    det["angle_deg"] = angle
+                if angle is not None and det.get("object_angle_deg") is None:
+                    det["object_angle_deg"] = angle
+            if det.get("angle_deg") is None:
+                det["angle_deg"] = det.get("object_angle_deg")
+            point = det.get("grasp_point")
+            if point and len(point) == 2:
+                try:
+                    det["pick_ny"] = int(round(float(point[0])))
+                    det["pick_nx"] = int(round(float(point[1])))
+                except (TypeError, ValueError):
+                    pass
+            elif box and len(box) == 4:
+                det["pick_ny"] = int(round((box[0] + box[2]) / 2))
+                det["pick_nx"] = int(round((box[1] + box[3]) / 2))
+            if det.get("angle_deg") is not None:
+                try:
+                    det["angle_deg"] = round(float(det["angle_deg"]), 1)
+                    det["pick_yaw_deg"] = round(det["angle_deg"] - 90.0, 1)
+                except (TypeError, ValueError):
+                    det["angle_deg"] = None
+                    det["pick_yaw_deg"] = None
         annotated = draw_contours(gemini_frame, detections) if mode == "grabcut" else draw_boxes(gemini_frame, detections)
         _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
         with _last_capture_lock:
@@ -277,8 +297,8 @@ def analyze():
         if _homography.H is not None:
             for det in detections:
                 box = det.get("box_2d") or [0, 0, 0, 0]
-                ny = (box[0] + box[2]) / 2
-                nx = (box[1] + box[3]) / 2
+                ny = det.get("pick_ny", (box[0] + box[2]) / 2)
+                nx = det.get("pick_nx", (box[1] + box[3]) / 2)
                 try:
                     if topdown is not None:
                         map_nx = GEMINI_GRID - nx if _analysis_flip_horizontal else nx
@@ -531,7 +551,7 @@ def robot_pick_and_place():
                 _log("info", f"Hente-koordinater: ny={pick[0]} nx={pick[1]} → X={prx*1000:.0f}mm Y={pry*1000:.0f}mm")
                 _log("info", f"Plassere-koordinater: ny={place[0]} nx={place[1]} → X={drx*1000:.0f}mm Y={dry*1000:.0f}mm")
                 if pick_angle_deg is not None:
-                    _log("info", f"Estimert gripevinkel: RZ={pick_angle_deg:.1f}°")
+                    _log("info", f"Objektvinkel: {pick_angle_deg:.1f}° → pick yaw {pick_angle_deg - 90.0:.1f}°")
             except Exception as e:
                 _log("warning", f"Kan ikke forhåndsvise koordinater: {e}")
             _status_msg = "Plukker objekt…"

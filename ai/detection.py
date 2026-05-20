@@ -12,8 +12,21 @@ from google.genai import types
 
 DETECT_PROMPT = """\
 Detect objects in the image. Return bounding boxes for up to 10 objects.
+For each object, also choose the best top-down pickup point and object yaw for
+a parallel two-finger gripper with a maximum 50 mm opening.
+Prefer a stable grasp across the narrowest practical dimension of the object,
+near its center of mass, avoiding edges, holes, reflective glare, and nearby
+obstacles. If the object is wider than 50 mm, choose the best graspable narrow
+part or a stable edge/handle contact point.
+Report the object's grasp axis angle; the robot applies a 90 degree gripper
+offset while picking so the fingers close across the object.
 The answer should follow the JSON format:
-[{"box_2d": [y_min, x_min, y_max, x_max], "label": "<object name>"}, ...]
+[{
+  "box_2d": [y_min, x_min, y_max, x_max],
+  "grasp_point": [y, x],
+  "object_angle_deg": 0,
+  "label": "<object name>"
+}, ...]
 Coordinates are normalized to 0-1000. Return ONLY the JSON, no other text.
 """
 
