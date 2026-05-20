@@ -11,10 +11,12 @@ from ur3_controller import UR3Controller
 
 if __name__ == "__main__":
 
-    # Singleton robot instance — connect/disconnect tools manage its lifecycle.
-    robot = UR3Controller(ip="192.168.0.10")
-
     mcp = FastMCP("UR3 Robot Controller")
+
+    
+
+    # Singleton robot instance — connect/disconnect tools manage its lifecycle.
+    robot = UR3Controller(ip="192.168.0.25")
 
     try:
         robot.connect()
@@ -24,7 +26,7 @@ if __name__ == "__main__":
         # Motion
         # ---------------------------------------------------------------------------
 
-        mcp.add_tool(robot.move_to_xyz_j)
+        mcp.add_tool(robot.move_robot)
 
 
         # ---------------------------------------------------------------------------

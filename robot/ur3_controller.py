@@ -5,6 +5,7 @@ import time
 import rtde_control
 from rtde_receive import RTDEReceiveInterface
 from robotiq_preamble import ROBOTIQ_PREAMBLE
+from transform import transform_robot_coordinates
 
 # -- Robotiq Gripper Klasse (Ekstrahert for ryddighet) --
 class RobotiqGripper(object):
@@ -46,7 +47,7 @@ class UR3Controller:
     _HW_JOINT_MIN = [-2*math.pi, -2*math.pi, -math.pi, -2*math.pi, -2*math.pi, -2*math.pi]
     _HW_JOINT_MAX = [ 2*math.pi,  2*math.pi,  math.pi,  2*math.pi,  2*math.pi,  2*math.pi]
 
-    def __init__(self, ip="192.168.0.25"):
+    def __init__(self, ip="192.168.0.25",scale = None, translation = None, rotation = None):
         self.ip = ip
         self.rtde_c = None
         self.rtde_r = None
@@ -63,6 +64,24 @@ class UR3Controller:
         # Zero pose persisted alongside this file
         self._zero_pose_path = os.path.join(os.path.dirname(__file__), "zero_pose.json")
         self._zero_pose = self._load_zero_pose()
+        
+        self.scale = [0.001, -0.001, -0.001]
+        if scale is list:
+            if len(scale) == 3:
+                self.scale = scale
+        
+                self.scale = [0.001, -0.001, -0.001]
+
+        self.translation = [0,0,0]
+        if translation is list:
+            if len(translation) == 3:
+                self.translation = translation
+ 
+        self.rotation = [0,0,0]
+        if rotation is list:
+            if len(rotation) == 3:
+                self.rotation = rotation
+
 
     # ------------------------------------------------------------------
     # Reference frame helpers
@@ -311,6 +330,8 @@ class UR3Controller:
         except ValueError as e:
             print(e)
             return
+        
+    
 
         # Optional safe-height via-point: lift in the zero frame, then sweep, then descend
         if safe_z is not None:
@@ -329,6 +350,39 @@ class UR3Controller:
 
         print(f"[UR3] moveJ to X:{target[0]:.3f}, Y:{target[1]:.3f}, Z:{target[2]:.3f}...")
         self.rtde_c.moveJ_IK(target, speed=speed, acceleration=acceleration)
+
+
+    def move_robot(self, coordinates):
+        """Transform and move the UR3 to a six-axis target pose.
+
+        ``coordinates`` must be a six-item list in the external/world frame:
+        ``[x, y, z, rx, ry, rz]``. The pose is converted into robot-frame
+        coordinates with the controller's configured ``scale``, ``translation``,
+        and ``rotation`` values, then passed to ``move_to_xyz_j`` with a fixed
+        safe lift height of 0.25 meters.
+
+        Position values are expected to match the configured scale, which
+        defaults to millimeters-to-meters conversion. Rotation values should
+        match the convention expected by ``transform_robot_coordinates``.
+        Invalid inputs return ``False`` without sending a movement command.
+        Valid inputs return ``True`` and moves the arm.
+        """
+
+        if type(coordinates) is not list:
+            return {f'"result": "Failure", "Reason":"coordinates is {type(coordinates)} not list"'}
+
+        if len(coordinates) != 6:
+            return {f'"result": "Failure", "Reason":"coordinates length is {len(coordinates)} not 6"'}
+
+
+        transformed_coords = transform_robot_coordinates([coordinates],
+                                                        scale=self.scale, 
+                                                        translation=self.translation, 
+                                                        rotation=self.rotation )
+        self.move_to_xyz_j(transformed_coords[0], safe_z=0.25)
+
+        return {"result": "Success"}
+
 
     def move_to_joints(self, q: list, speed=0.5, acceleration=0.5):
         """Moves directly to a joint configuration [j0..j5] in radians using MOVEJ.
