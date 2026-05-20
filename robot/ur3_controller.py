@@ -396,6 +396,13 @@ class UR3Controller:
         print(f"[UR3] moveJ joints {[f'{math.degrees(a):.1f}°' for a in q]}...")
         self.rtde_c.moveJ(q, speed=speed, acceleration=acceleration)
 
+    def gripper_activate(self):
+        if self.gripper:
+            self.gripper.activate()
+            return True
+        else:
+            return False
+
     def grab_object(self):
         """Standard sekvens for å lukke griperen om et objekt."""
         print("[UR3] Lukker griper.")
