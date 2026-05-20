@@ -272,16 +272,20 @@
       line-height: 0;
     }
     #capture-img-wrapper img { display: block; }
+    #capture-img-wrapper img { cursor: pointer; }
     #capture-img-wrapper.dest-mode img { cursor: crosshair; }
-    #dest-marker {
+    #dest-marker,
+    #selected-marker {
       position: absolute;
       width: 22px; height: 22px;
-      border: 3px solid #f59e0b;
-      border-radius: 50%;
-      box-shadow: 0 0 8px #f59e0b88;
       transform: translate(-50%, -50%);
       pointer-events: none;
       display: none;
+    }
+    #dest-marker {
+      border: 3px solid #f59e0b;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #f59e0b88;
     }
     #dest-marker::before {
       content: '';
@@ -297,6 +301,27 @@
       top: -10px; left: 50%;
       width: 2px; height: 18px;
       background: #f59e0b;
+      transform: translateX(-50%);
+    }
+    #selected-marker {
+      border: 3px solid #38bdf8;
+      border-radius: 4px;
+      box-shadow: 0 0 10px #38bdf888;
+    }
+    #selected-marker::before {
+      content: '';
+      position: absolute;
+      top: 50%; left: -9px;
+      width: 16px; height: 2px;
+      background: #38bdf8;
+      transform: translateY(-50%);
+    }
+    #selected-marker::after {
+      content: '';
+      position: absolute;
+      top: -9px; left: 50%;
+      width: 2px; height: 16px;
+      background: #38bdf8;
       transform: translateX(-50%);
     }
 
@@ -515,6 +540,7 @@
       </div>
       <div id="capture-img-wrapper">
         <img id="capture-img" src="" alt="Siste analyse" style="display:none" onclick="captureImgClick(event)">
+        <div id="selected-marker"></div>
         <div id="dest-marker"></div>
       </div>
     </div>
@@ -580,12 +606,12 @@
     <!-- Pick & Place -->
     <div class="ctrl-group" style="flex:1;min-width:260px">
       <label>Plukk &amp; Plasser</label>
-      <div id="pickplace-summary">Velg et objekt fra listen, klikk deretter destinasjon på bildet.</div>
+      <div id="pickplace-summary">Steg 1: Velg objekt i bildet. Steg 2: Klikk destinasjon. Robot starter automatisk.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-neutral"  id="btn-dest-mode" onclick="toggleDestMode()" disabled>
+        <button class="btn btn-neutral"  id="btn-dest-mode" onclick="toggleDestMode()" disabled style="display:none">
           Velg destinasjon
         </button>
-        <button class="btn btn-warning"  id="btn-execute"   onclick="executePick()"    disabled>
+        <button class="btn btn-warning"  id="btn-execute"   onclick="executePick()"    disabled style="display:none">
           Kjør ▶
         </button>
         <button class="btn btn-neutral"  id="btn-reset-pp"  onclick="resetPickPlace()" style="display:none">
@@ -714,6 +740,7 @@
   let selectedObject  = null;   // { idx, label, ny, nx }
   let destinationPoint = null;  // { ny, nx }
   let destMode        = false;
+  let autoRunPending  = false;
   let robotConnected  = false;
   let robotBusy       = false;
   let verifyMode     = false;
@@ -807,6 +834,14 @@
 
   // ── Object selection ──────────────────────────────────────────────────────
   function selectObject(idx) {
+    if (!robotConnected) {
+      setStatus('Koble til robot før du velger objekt.');
+      return false;
+    }
+    if (robotBusy) {
+      setStatus('Robot er opptatt.');
+      return false;
+    }
     const d = lastDetections[idx] || {};
     const box = d.box_2d || [0, 0, 0, 0];
     selectedObject = {
@@ -822,13 +857,57 @@
     document.querySelectorAll('#detection-list li').forEach((li, i) => {
       li.classList.toggle('selected', i === idx);
     });
+    destinationPoint = null;
+    document.getElementById('dest-marker').style.display = 'none';
+    updateSelectedMarker();
     updatePickPlaceSummary();
+    setDestinationMode(true);
+    setStatus('Objekt valgt. Klikk destinasjonen i bildet.');
     updatePickPlaceButtons();
+    return true;
+  }
+
+  function updateSelectedMarker() {
+    const marker = document.getElementById('selected-marker');
+    if (!selectedObject) {
+      marker.style.display = 'none';
+      return;
+    }
+    marker.style.left = (selectedObject.nx / 10) + '%';
+    marker.style.top  = (selectedObject.ny / 10) + '%';
+    marker.style.display = 'block';
+  }
+
+  function detectionPickPoint(d) {
+    const box = d.box_2d || [0, 0, 0, 0];
+    return {
+      ny: d.pick_ny !== undefined ? d.pick_ny : Math.round((box[0] + box[2]) / 2),
+      nx: d.pick_nx !== undefined ? d.pick_nx : Math.round((box[1] + box[3]) / 2),
+    };
+  }
+
+  function selectNearestObject(ny, nx) {
+    if (!lastDetections.length) return false;
+    let bestIdx = -1;
+    let bestDist = Infinity;
+    lastDetections.forEach((d, i) => {
+      const p = detectionPickPoint(d);
+      const dist = Math.hypot(p.ny - ny, p.nx - nx);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    });
+    if (bestIdx < 0 || bestDist > 120) {
+      setStatus('Ingen objekt nær klikkpunktet.');
+      return false;
+    }
+    return selectObject(bestIdx);
   }
 
   // ── Destination mode ──────────────────────────────────────────────────────
-  function toggleDestMode() {
-    destMode = !destMode;
+  function setDestinationMode(active) {
+    destMode = active;
     const btn = document.getElementById('btn-dest-mode');
     const wrapper = document.getElementById('capture-img-wrapper');
     btn.textContent = destMode ? 'Klikk på bildet…' : 'Velg destinasjon';
@@ -837,12 +916,21 @@
     wrapper.classList.toggle('dest-mode', destMode);
   }
 
+  function toggleDestMode() {
+    setDestinationMode(!destMode);
+  }
+
   function captureImgClick(e) {
-    if (!destMode) return;
     const img  = document.getElementById('capture-img');
     const rect = img.getBoundingClientRect();
     const nx = Math.round((e.clientX - rect.left) / rect.width  * 1000);
     const ny = Math.round((e.clientY - rect.top)  / rect.height * 1000);
+
+    if (!destMode) {
+      selectNearestObject(ny, nx);
+      return;
+    }
+
     destinationPoint = { ny, nx };
 
     // Place crosshair marker at click position
@@ -852,14 +940,9 @@
     marker.style.display = 'block';
 
     // Exit destination mode
-    destMode = false;
-    const btn = document.getElementById('btn-dest-mode');
-    btn.textContent      = 'Velg destinasjon';
-    btn.style.background = '';
-    btn.style.color      = '';
-    document.getElementById('capture-img-wrapper').classList.remove('dest-mode');
+    setDestinationMode(false);
 
-    // Fetch robot mm coords for destination, then update summary
+    // Fetch robot mm coords for destination, then run automatically.
     post('/api/preview_coords', { ny, nx, topdown: true }).then(data => {
       if (data.rx_mm !== undefined) {
         destinationPoint.rx_mm = data.rx_mm;
@@ -867,9 +950,11 @@
       }
       updatePickPlaceSummary();
       updatePickPlaceButtons();
+      executePick();
     }).catch(() => {
       updatePickPlaceSummary();
       updatePickPlaceButtons();
+      executePick();
     });
   }
 
@@ -903,17 +988,18 @@
     const hasDets  = lastDetections.length > 0;
     document.getElementById('btn-dest-mode').disabled = !hasDets || robotBusy;
     document.getElementById('btn-execute').disabled   = !(hasObj && hasDest && robotConnected && !robotBusy);
-    document.getElementById('btn-reset-pp').style.display = (hasObj || hasDest) ? '' : 'none';
+    document.getElementById('btn-reset-pp').style.display = (hasObj || hasDest || destMode) ? '' : 'none';
   }
 
   function resetPickPlace() {
     selectedObject   = null;
     destinationPoint = null;
-    if (destMode) toggleDestMode();
+    setDestinationMode(false);
     document.querySelectorAll('#detection-list li').forEach(li => li.classList.remove('selected'));
     document.getElementById('dest-marker').style.display = 'none';
+    document.getElementById('selected-marker').style.display = 'none';
     document.getElementById('pickplace-summary').innerHTML =
-      'Velg et objekt fra listen, klikk deretter destinasjon på bildet.';
+      'Steg 1: Velg objekt i bildet. Steg 2: Klikk destinasjon. Robot starter automatisk.';
     document.getElementById('pickplace-summary').style.color = '';
     updatePickPlaceButtons();
   }
@@ -921,6 +1007,8 @@
   // ── Execute pick & place ──────────────────────────────────────────────────
   async function executePick() {
     if (!selectedObject || !destinationPoint) return;
+    if (autoRunPending || robotBusy) return;
+    autoRunPending = true;
     document.getElementById('btn-execute').disabled = true;
     setStatus('Sender pick & place til robot…');
     try {
@@ -937,6 +1025,9 @@
       }
     } catch (e) {
       setStatus('Nettverksfeil: ' + e.message);
+    } finally {
+      autoRunPending = false;
+      updatePickPlaceButtons();
     }
   }
 
