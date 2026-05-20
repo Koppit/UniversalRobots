@@ -1,5 +1,5 @@
-from transform import transform_robot_coordinates
-from ur3_controller import UR3Controller
+from robot.transform import transform_robot_coordinates
+from robot.ur3_controller import UR3Controller
 from dotenv import load_dotenv
 import os
 

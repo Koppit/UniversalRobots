@@ -16,15 +16,14 @@ import logging
 from collections import deque
 from datetime import datetime
 from pathlib import Path
+import cv2
+import numpy as np
+from flask import Flask, Response, render_template, jsonify, request
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
-
-import cv2
-import numpy as np
-from flask import Flask, Response, render_template, jsonify, request
 
 from vision.camera import BRIOCamera  # noqa: E402
 from vision.homography import GEMINI_GRID, HomographyConverter  # noqa: E402
