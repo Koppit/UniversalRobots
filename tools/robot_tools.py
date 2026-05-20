@@ -48,7 +48,7 @@ class RobotActionTools:
             return None
         return object_yaw_deg + self.gripper_yaw_offset_deg
 
-    def _go_home(self):
+    def go_home(self):
         """Beveger armen til hjemposisjon (X=0, Y=50mm, Z=200mm over bordet)."""
         rx   =  self.x_home_mm / 1000
         ry_rel = -(self.y_home_mm / 1000)   # negate for Rx(π) Y-inversjon
@@ -56,6 +56,9 @@ class RobotActionTools:
         self._log("info",
             f"  Hjem: X={self.x_home_mm}mm Y={self.y_home_mm}mm Z={self.z_home_mm}mm")
         self.robot.move_to_xyz_j([rx, ry_rel, z_rel, *self._ROTATION])
+
+    def _go_home(self):
+        self.go_home()
 
     def _move(self, label: str, rx: float, ry: float, z_mm: float, yaw_deg: float | None = None):
         """Sender en bevegelse. z_mm er høyde over bordet i mm (positiv = over)."""

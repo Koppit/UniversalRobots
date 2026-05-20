@@ -1393,6 +1393,8 @@
       } else {
         statusEl.style.color = '#94a3b8';
         statusEl.textContent = 'Agent startet: «' + text + '»';
+        refreshAfterRobotRun = true;
+        robotRunSeenBusy = false;
         input.value = '';
       }
     } catch (err) {

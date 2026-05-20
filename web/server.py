@@ -447,13 +447,17 @@ def robot_connect():
                 _log("error", "Tilkobling mislyktes.")
                 _status_msg = "FEIL: Tilkobling til robot mislyktes."
                 return
-            _log("info", "TCP-tilkobling OK. Aktiverer griper…")
+            robot.set_workspace_limits(x=(-1.5, 1.5), y=(-1.5, 0.1), z=(-1.10, 1.55))
+            robot_tools = RobotActionTools(robot, _homography, logger=_log)
+            _log("info", "TCP-tilkobling OK. Kjører robot til hjemposisjon før griper aktiveres…")
+            _status_msg = "Kjører robot til hjemposisjon…"
+            robot_tools.go_home()
+            _log("info", "Robot i hjemposisjon. Aktiverer griper…")
             _status_msg = "Aktiverer griper (5 s)…"
             robot.gripper.activate()
             robot.release_object()
-            robot.set_workspace_limits(x=(-1.5, 1.5), y=(-1.5, 0.1), z=(-1.10, 1.55))
             _robot = robot
-            _robot_tools = RobotActionTools(robot, _homography, logger=_log)
+            _robot_tools = robot_tools
             _log("info", "Robot tilkoblet og klar.")
             _status_msg = "Robot tilkoblet."
         except BaseException as exc:
