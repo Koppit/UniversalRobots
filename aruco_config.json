@@ -1,5 +1,5 @@
 {
-  "marker_size_m": 0.02,
+  "marker_size_m": 0.04,
   "dictionary": "DICT_4X4_50",
   "markers": {
     "1": [-0.415, -0.265],

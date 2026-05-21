@@ -159,7 +159,12 @@ def _start_robot_connect() -> tuple[dict, int]:
                 _status_msg = "FEIL: Tilkobling til robot mislyktes."
                 return
             robot.set_workspace_limits(x=(-1.5, 1.5), y=(-1.5, 0.1), z=(-1.10, 1.55))
-            robot_tools = RobotActionTools(robot, _homography, logger=_log)
+            robot_tools = RobotActionTools(
+                robot,
+                _homography,
+                logger=_log,
+                topdown_flip_horizontal=False,
+            )
             _log("info", "TCP-tilkobling OK. Kjører robot til hjemposisjon før griper aktiveres…")
             _status_msg = "Kjører robot til hjemposisjon…"
             robot_tools.go_home()
@@ -441,8 +446,7 @@ def analyze():
                 nx = det.get("pick_nx", (box[1] + box[3]) / 2)
                 try:
                     if topdown is not None:
-                        map_nx = GEMINI_GRID - nx if _analysis_flip_horizontal else nx
-                        rx, ry = _homography.topdown_gemini_to_robot(ny, map_nx)
+                        rx, ry = _homography.topdown_gemini_to_robot(ny, nx)
                     else:
                         rx, ry = _homography.convert_gemini_to_robot(ny, nx)
                     det["rx_mm"] = round(rx * 1000, 1)
@@ -502,8 +506,7 @@ def api_preview_coords():
     try:
         use_topdown = data.get("topdown", False) and _homography._topdown_bounds is not None
         if use_topdown:
-            map_nx = GEMINI_GRID - nx if _analysis_flip_horizontal else nx
-            rx, ry = _homography.topdown_gemini_to_robot(ny, map_nx)
+            rx, ry = _homography.topdown_gemini_to_robot(ny, nx)
         else:
             rx, ry = _homography.convert_gemini_to_robot(ny, nx)
         return jsonify({"calibrated": True, "rx_mm": round(rx * 1000, 1), "ry_mm": round(ry * 1000, 1)})
@@ -661,8 +664,8 @@ def robot_pick_and_place():
         _robot_busy = True
         try:
             try:
-                prx, pry = _homography.gemini_to_robot(pick[0], pick[1])
-                drx, dry = _homography.gemini_to_robot(place[0], place[1])
+                prx, pry = _robot_tools.gemini_to_robot(pick[0], pick[1])
+                drx, dry = _robot_tools.gemini_to_robot(place[0], place[1])
                 _log("info", f"Hente-koordinater: ny={pick[0]} nx={pick[1]} → X={prx*1000:.0f}mm Y={pry*1000:.0f}mm")
                 _log("info", f"Plassere-koordinater: ny={place[0]} nx={place[1]} → X={drx*1000:.0f}mm Y={dry*1000:.0f}mm")
                 if pick_angle_deg is not None:
@@ -944,12 +947,15 @@ def _draw_coord_grid(frame: np.ndarray, H: np.ndarray, aruco) -> np.ndarray:
     return out
 
 
-def _draw_topdown_grid(frame: np.ndarray, x_min, x_max, y_min, y_max) -> np.ndarray:
+def _draw_topdown_grid(frame: np.ndarray, x_min, x_max, y_min, y_max, flip_horizontal: bool = True) -> np.ndarray:
     """Draw 4×4 coordinate grid on an already-warped top-down image.
 
-    Assumes the image was produced by warp_to_topdown (180-degree flip applied), so:
-      - X decreases left → right  (x_max at left edge, x_min at right)
+    When flip_horizontal is True, the image is displayed in the same orientation
+    as analysis:
+      - X increases left -> right  (x_min at left edge, x_max at right)
       - Y increases top → bottom  (y_min at top,       y_max at bottom)
+    Otherwise it uses the raw warp_to_topdown orientation, where X decreases
+    left -> right.
     Grid lines are perfectly straight in this space, so no perspective transform needed.
     """
     out = frame.copy()
@@ -957,7 +963,10 @@ def _draw_topdown_grid(frame: np.ndarray, x_min, x_max, y_min, y_max) -> np.ndar
     font = cv2.FONT_HERSHEY_SIMPLEX
 
     def r2p(rx, ry):
-        px = int(round((x_max - rx) / (x_max - x_min) * (w - 1)))
+        if flip_horizontal:
+            px = int(round((rx - x_min) / (x_max - x_min) * (w - 1)))
+        else:
+            px = int(round((x_max - rx) / (x_max - x_min) * (w - 1)))
         py = int(round((ry - y_min) / (y_max - y_min) * (h - 1)))
         return (px, py)
 
@@ -1000,9 +1009,13 @@ def calibrate_preview():
 
     topdown = _homography.warp_to_topdown(frame)
     if topdown is not None and _homography._topdown_bounds is not None:
-        frame = topdown
+        frame = cv2.flip(topdown, 1) if _analysis_flip_horizontal else topdown
         if _calib_overlay:
-            frame = _draw_topdown_grid(frame, *_homography._topdown_bounds)
+            frame = _draw_topdown_grid(
+                frame,
+                *_homography._topdown_bounds,
+                flip_horizontal=_analysis_flip_horizontal,
+            )
     else:
         # Fallback: raw frame with ArUco outlines and projected grid
         if aruco is not None:

@@ -3,6 +3,7 @@ import math
 from pathlib import Path
 
 from robot.transform import transform_robot_coordinates
+from vision.homography import GEMINI_GRID
 
 
 WORKSPACE_ROTATION_CONFIG_PATH = Path(__file__).parent.parent / "workspace_rotation.json"
@@ -43,10 +44,11 @@ class RobotActionTools:
     _HOME_ROTATION = [0.523598776, 0.0, 0.0]  # parkeringsorientering
     gripper_yaw_offset_deg = -90.0  # pick yaw offset so fingers close across the object
 
-    def __init__(self, robot_controller, coordinate_converter, logger=None):
+    def __init__(self, robot_controller, coordinate_converter, logger=None, topdown_flip_horizontal: bool = False):
         self.robot = robot_controller
         self.homography = coordinate_converter
         self._log = logger or print
+        self.topdown_flip_horizontal = topdown_flip_horizontal
         self.workspace_rotation = _load_workspace_rotation()
 
     def _lift_to_hover(self):
@@ -71,6 +73,16 @@ class RobotActionTools:
         if object_yaw_deg is None:
             return None
         return object_yaw_deg + self.gripper_yaw_offset_deg
+
+    def gemini_to_robot(self, normalized_y: float, normalized_x: float) -> tuple[float, float]:
+        """Map displayed analysis coordinates to robot XY.
+
+        Execution uses the calibrated top-down coordinate frame directly.
+        """
+        if getattr(self.homography, "_topdown_bounds", None) is not None:
+            map_x = GEMINI_GRID - normalized_x if self.topdown_flip_horizontal else normalized_x
+            return self.homography.topdown_gemini_to_robot(normalized_y, map_x)
+        return self.homography.convert_gemini_to_robot(normalized_y, normalized_x)
 
     def go_home(self):
         """Beveger armen til hjemposisjon (X=0, Y=50mm, Z=200mm over bordet)."""
@@ -101,7 +113,7 @@ class RobotActionTools:
 
     def move_to_object(self, normalized_y: int, normalized_x: int):
         """Gemini kaller denne for å flytte armen over objektets senter."""
-        rx, ry = self.homography.gemini_to_robot(normalized_y, normalized_x)
+        rx, ry = self.gemini_to_robot(normalized_y, normalized_x)
         self._log("info", f"[Tools] move_to_object  ny={normalized_y} nx={normalized_x}"
                            f" → X={rx*1000:+.1f}mm Y={ry*1000:+.1f}mm")
         self._lift_to_hover()
@@ -110,7 +122,7 @@ class RobotActionTools:
 
     def pick_object_at(self, normalized_y: int, normalized_x: int, angle_deg: float | None = None):
         """Utfører full pick-operasjon: hover → åpne → ned → klem → opp."""
-        rx, ry = self.homography.gemini_to_robot(normalized_y, normalized_x)
+        rx, ry = self.gemini_to_robot(normalized_y, normalized_x)
         pick_yaw = self._pick_yaw_deg(angle_deg)
         self._log("info", f"[Tools] pick_object_at  ny={normalized_y} nx={normalized_x}"
                            f" → X={rx*1000:+.1f}mm Y={ry*1000:+.1f}mm"
@@ -130,7 +142,7 @@ class RobotActionTools:
 
     def place_object_at(self, normalized_y: int, normalized_x: int):
         """Plasserer holdt objekt på angitt posisjon og slipper det."""
-        rx, ry = self.homography.gemini_to_robot(normalized_y, normalized_x)
+        rx, ry = self.gemini_to_robot(normalized_y, normalized_x)
         self._log("info", f"[Tools] place_object_at ny={normalized_y} nx={normalized_x}"
                            f" → X={rx*1000:+.1f}mm Y={ry*1000:+.1f}mm")
 
