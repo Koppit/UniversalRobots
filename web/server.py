@@ -37,6 +37,16 @@ from robot.transform import transform_robot_coordinates  # noqa: E402
 # mm → m, inverter y- og z-akse (samme som test_robot.py)
 MM_SCALE = [0.001, -0.001, -0.001]
 WORKSPACE_ROTATION_CONFIG_PATH = Path(__file__).parent.parent / "workspace_rotation.json"
+WRIST_CAMERA_ANALYSIS_CONTEXT = """\
+Auxiliary wrist-camera perspective:
+- The primary image remains the calibrated webcam/top-down workspace image.
+- Use the wrist-camera image only as secondary context for object shape,
+  occlusion, orientation, and grasp quality.
+- All returned coordinates must still be in the primary image's normalized
+  0-1000 coordinate space.
+- Wrist camera offset from robot is placed 535mm over the table.
+- Wrist camera orientation: facing down, top of image is negative Y-direction
+"""
 
 
 def _load_workspace_rotation():
@@ -227,6 +237,11 @@ def _make_camera(source: str, index=None):
     return BRIOCamera(device_index=index)
 
 
+def _capture_wrist_analysis_frame() -> np.ndarray | None:
+    robot_ip = os.environ.get("ROBOT_IP", "192.168.0.25")
+    return WristCamera(robot_ip, timeout_s=1.0).capture_once()
+
+
 def _parse_camera_selection(data: dict) -> tuple[str, int | None]:
     camera_id = data.get("id")
     if camera_id == "wrist":
@@ -375,7 +390,17 @@ def analyze():
     _log("info", f"Starter analyse: {label}")
     _status_msg = f"Analyserer ({label})…"
     try:
-        detections = detect_objects(_client, gemini_frame)
+        wrist_frame = _capture_wrist_analysis_frame()
+        if wrist_frame is not None:
+            _log("info", "Wristcam-bilde lagt ved som sekundær analysevinkel.")
+        else:
+            _log("warning", "Wristcam ikke tilgjengelig – analyserer kun webcam/topdown.")
+        detections = detect_objects(
+            _client,
+            gemini_frame,
+            secondary_frame=wrist_frame,
+            secondary_context=WRIST_CAMERA_ANALYSIS_CONTEXT,
+        )
         for det in detections:
             box = det.get("box_2d")
             angle = None

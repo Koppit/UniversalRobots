@@ -36,10 +36,11 @@ class RobotActionTools:
     z_height_place_mm = z_height_pick_mm + 2  # 2 mm over pick-høyden
     # Home position visited after pickup and after place (safe transit point)
     x_home_mm =   0
-    y_home_mm =  -125
-    z_home_mm = 200
+    y_home_mm =  100
+    z_home_mm = 420
 
-    _ROTATION = [0.0, 0.0, 3.14]  # RX=0 RY=0 RZ=0 — verktøy peker rett ned
+    _WORK_ROTATION = [0.0, 0.0, 0.0]  # RX=0 RY=0 — verktøy peker rett ned under arbeid
+    _HOME_ROTATION = [0.523598776, 0.0, 0.0]  # parkeringsorientering
     gripper_yaw_offset_deg = -90.0  # pick yaw offset so fingers close across the object
 
     def __init__(self, robot_controller, coordinate_converter, logger=None):
@@ -61,7 +62,7 @@ class RobotActionTools:
         self.robot.lift_to_absolute_z(hover_abs_z)
 
     def _rotation_for_yaw(self, yaw_deg: float | None = None) -> list[float]:
-        rotation = list(self._ROTATION)
+        rotation = list(self._WORK_ROTATION)
         if yaw_deg is not None:
             rotation[2] += math.radians(yaw_deg + self.gripper_yaw_offset_deg)
         return rotation
@@ -78,7 +79,7 @@ class RobotActionTools:
         z_rel  = -(self.z_home_mm / 1000)   # negate for Rx(π) Z-inversjon
         self._log("info",
             f"  Hjem: X={self.x_home_mm}mm Y={self.y_home_mm}mm Z={self.z_home_mm}mm")
-        self.robot.move_to_xyz_j([rx, ry_rel, z_rel, *self._ROTATION])
+        self.robot.move_to_xyz_j([rx, ry_rel, z_rel, *self._HOME_ROTATION])
 
     def _go_home(self):
         self.go_home()

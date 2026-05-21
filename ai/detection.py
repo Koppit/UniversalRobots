@@ -30,6 +30,20 @@ The answer should follow the JSON format:
 Coordinates are normalized to 0-1000. Return ONLY the JSON, no other text.
 """
 
+SECONDARY_PERSPECTIVE_PROMPT = """\
+You are given two images:
+1. The first image is the primary calibrated webcam/top-down workspace image.
+   All returned box_2d and grasp_point coordinates MUST be based only on this
+   first image, normalized to its 0-1000 coordinate space.
+2. The second image is an auxiliary robot wrist-camera view. Use it only as
+   secondary visual context for shape, occlusion, orientation, and grasp quality.
+   Do not return coordinates from the wrist-camera image.
+
+Wrist-camera pose relative to the robot TCP:
+- translation: X +0 mm, Y +45 mm, Z +140 mm
+- orientation: facing down at 45 degrees around RY
+"""
+
 
 def make_client() -> genai.Client | None:
     api_key = os.getenv("GEMINI_API_KEY", "")
@@ -50,16 +64,24 @@ def parse_response(text: str) -> list:
     return []
 
 
-def detect_objects(client: genai.Client, frame) -> list:
+def detect_objects(client: genai.Client, frame, secondary_frame=None, secondary_context: str | None = None) -> list:
     import cv2
     import numpy as np
     _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    contents = [
+        types.Part.from_bytes(data=buf.tobytes(), mime_type="image/jpeg"),
+    ]
+    if secondary_frame is not None:
+        _, secondary_buf = cv2.imencode(".jpg", secondary_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        contents.extend([
+            types.Part.from_bytes(data=secondary_buf.tobytes(), mime_type="image/jpeg"),
+            secondary_context or SECONDARY_PERSPECTIVE_PROMPT,
+        ])
+    contents.append(DETECT_PROMPT)
+
     response = client.models.generate_content(
         model="gemini-robotics-er-1.6-preview",
-        contents=[
-            types.Part.from_bytes(data=buf.tobytes(), mime_type="image/jpeg"),
-            DETECT_PROMPT,
-        ],
+        contents=contents,
         config=types.GenerateContentConfig(
             temperature=1.0,
             thinking_config=types.ThinkingConfig(thinking_budget=0),

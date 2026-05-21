@@ -31,7 +31,7 @@ class WristCamera:
         self._thread: threading.Thread | None = None
 
     def open(self) -> bool:
-        frame = self._fetch_frame()
+        frame = self.capture_once()
         if frame is None:
             print(f"[WristCam] FEIL: Kan ikke hente bilde fra {self.url}: {self._last_error}")
             return False
@@ -55,7 +55,7 @@ class WristCamera:
             self._thread.join(timeout=2)
         print("[WristCam] Lukket.")
 
-    def _fetch_frame(self) -> np.ndarray | None:
+    def capture_once(self) -> np.ndarray | None:
         try:
             with urllib.request.urlopen(self.url, timeout=self.timeout_s) as response:
                 if response.status != 200:
@@ -77,7 +77,7 @@ class WristCamera:
     def _capture_loop(self):
         delay_s = 1.0 / max(1, self.fps)
         while self._running:
-            frame = self._fetch_frame()
+            frame = self.capture_once()
             if frame is not None:
                 self.height, self.width = frame.shape[:2]
                 with self._lock:
