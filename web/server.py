@@ -638,6 +638,51 @@ def robot_move():
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/robot/gripper/open", methods=["POST"])
+def robot_gripper_open():
+    if _robot is None:
+        return jsonify({"error": "Robot ikke tilkoblet"}), 400
+    if _robot_busy:
+        return jsonify({"error": "Robot er opptatt"}), 409
+    try:
+        _log("info", "Manuell griper: åpne")
+        _robot.release_object()
+        return jsonify({"ok": True})
+    except Exception as exc:
+        _log("error", f"Griperfeil: {exc}")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/robot/gripper/close", methods=["POST"])
+def robot_gripper_close():
+    if _robot is None:
+        return jsonify({"error": "Robot ikke tilkoblet"}), 400
+    if _robot_busy:
+        return jsonify({"error": "Robot er opptatt"}), 409
+    try:
+        _log("info", "Manuell griper: lukk")
+        _robot.grab_object()
+        return jsonify({"ok": True})
+    except Exception as exc:
+        _log("error", f"Griperfeil: {exc}")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/robot/home", methods=["POST"])
+def robot_home():
+    if _robot_tools is None:
+        return jsonify({"error": "Robot ikke tilkoblet"}), 400
+    if _robot_busy:
+        return jsonify({"error": "Robot er opptatt"}), 409
+    try:
+        _log("info", "Manuell kjøring: hjemposisjon")
+        _robot_tools.go_home()
+        return jsonify({"ok": True})
+    except Exception as exc:
+        _log("error", f"Hjemposisjon-feil: {exc}")
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/api/robot/pick_and_place", methods=["POST"])
 def robot_pick_and_place():
     global _robot_busy, _status_msg

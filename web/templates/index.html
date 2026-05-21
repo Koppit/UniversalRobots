@@ -597,7 +597,18 @@
           <div><span style="font-size:10px;color:#94a3b8">RZ (°)</span>
             <input id="jog-rz" type="number" step="1" value="0" style="width:100%;box-sizing:border-box"></div>
         </div>
-        <button class="btn btn-warning" id="btn-jog" onclick="jogRobot()" disabled>Kjør ▶</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-warning" id="btn-jog" onclick="jogRobot()" disabled style="flex:1">Kjør ▶</button>
+          <button class="btn btn-neutral" id="btn-home" onclick="goHome()" disabled style="flex:1">Hjem</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-neutral" id="btn-gripper-open" onclick="setGripper('open')" disabled style="flex:1">
+            Åpne griper
+          </button>
+          <button class="btn btn-neutral" id="btn-gripper-close" onclick="setGripper('close')" disabled style="flex:1">
+            Lukk griper
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1087,6 +1098,25 @@
     else setStatus('Posisjon nådd.');
   }
 
+  async function setGripper(action) {
+    const label = action === 'open' ? 'åpner' : 'lukker';
+    setStatus(`Manuell griper: ${label}…`);
+    let data;
+    try { data = await post(`/api/robot/gripper/${action}`); }
+    catch (e) { setStatus('Nettverksfeil: ' + e.message); return; }
+    if (data.error) setStatus('Griperfeil: ' + data.error);
+    else setStatus(action === 'open' ? 'Griper åpnet.' : 'Griper lukket.');
+  }
+
+  async function goHome() {
+    setStatus('Kjører til hjemposisjon…');
+    let data;
+    try { data = await post('/api/robot/home'); }
+    catch (e) { setStatus('Nettverksfeil: ' + e.message); return; }
+    if (data.error) setStatus('Hjemposisjon-feil: ' + data.error);
+    else setStatus('Robot i hjemposisjon.');
+  }
+
   // ── Kalibrering verifisering ──────────────────────────────────────────────
   function toggleVerify() {
     verifyMode = !verifyMode;
@@ -1158,6 +1188,9 @@
     btnD.style.display = connected ? ''     : 'none';
     btnS.style.display = (connected && busy) ? '' : 'none';
     document.getElementById('btn-jog').disabled = !(connected && !busy);
+    document.getElementById('btn-home').disabled = !(connected && !busy);
+    document.getElementById('btn-gripper-open').disabled = !(connected && !busy);
+    document.getElementById('btn-gripper-close').disabled = !(connected && !busy);
   }
 
   // ── UI helpers ────────────────────────────────────────────────────────────
