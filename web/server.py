@@ -891,6 +891,38 @@ def _freeze_workspace_hull() -> bool:
     return True
 
 
+def _refresh_workspace_calibration(status_prefix: str = "ArUco kalibrering") -> tuple[dict, int]:
+    """Rebuild homography and the cached workspace hull from the current webcam view."""
+    global _auto_calib_done, _status_msg
+    aruco = _get_aruco()
+    if aruco is None:
+        return {"success": False, "error": "ArUco-config mangler i config.json."}, 500
+    frame = _webcam.capture_frame()
+    if frame is None:
+        return {"success": False, "error": "Ingen frame fra kamera."}, 500
+
+    ok, detected_ids = _homography.calibrate_aruco(_webcam)
+    if ok:
+        hull_ok = _freeze_workspace_hull()
+        _auto_calib_done = True
+        if hull_ok:
+            _status_msg = f"{status_prefix} fullfort med ID: {detected_ids}. Arbeidsområde oppdatert."
+        else:
+            _status_msg = (
+                f"{status_prefix} fullfort med ID: {detected_ids}, "
+                "men arbeidsområde-masken ble ikke oppdatert."
+            )
+        return {
+            "success": True,
+            "markers_used": detected_ids,
+            "workspace_hull_updated": hull_ok,
+        }, 200
+
+    msg = f"{status_prefix} feilet — kun {len(detected_ids)} markorer funnet."
+    _status_msg = msg
+    return {"success": False, "error": msg, "detected": detected_ids}, 422
+
+
 def _apply_workspace_mask(frame: np.ndarray) -> np.ndarray:
     """Svartlegger alt utenfor arbeidsområde-polygonen."""
     hull = _workspace_hull_pixels()
@@ -918,6 +950,12 @@ def workspace_toggle():
     global _mask_workspace
     _mask_workspace = not _mask_workspace
     return jsonify({"mask": _mask_workspace})
+
+
+@app.route("/api/workspace/reset", methods=["POST"])
+def workspace_reset():
+    result, status = _refresh_workspace_calibration("Arbeidsområde-reset")
+    return jsonify(result), status
 
 
 @app.route("/api/calibrate/overlay", methods=["POST"])
@@ -1095,22 +1133,8 @@ def calibrate_preview():
 
 @app.route("/api/calibrate/run", methods=["POST"])
 def calibrate_run():
-    global _status_msg
-    aruco = _get_aruco()
-    if aruco is None:
-        return jsonify({"success": False, "error": "ArUco-config mangler i config.json."}), 500
-    frame = _webcam.capture_frame()
-    if frame is None:
-        return jsonify({"success": False, "error": "Ingen frame fra kamera."}), 500
-    ok, detected_ids = _homography.calibrate_aruco(_webcam)
-    if ok:
-        _freeze_workspace_hull()
-        _status_msg = f"ArUco kalibrering fullfort med ID: {detected_ids}"
-        return jsonify({"success": True, "markers_used": detected_ids})
-    else:
-        msg = f"Kalibrering feilet — kun {len(detected_ids)} markorer funnet."
-        _status_msg = msg
-        return jsonify({"success": False, "error": msg, "detected": detected_ids}), 422
+    result, status = _refresh_workspace_calibration()
+    return jsonify(result), status
 
 
 # ---------------------------------------------------------------------------

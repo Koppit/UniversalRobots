@@ -511,6 +511,12 @@
                  font-weight:600;letter-spacing:.04em">
           Masker PÅ
         </button>
+        <button id="btn-workspace-reset" onclick="resetWorkspaceCalibration()"
+          style="background:#14532d;border:1px solid #16a34a;color:#86efac;
+                 font-size:11px;padding:3px 10px;border-radius:4px;cursor:pointer;
+                 font-weight:600;letter-spacing:.04em">
+          Reset område
+        </button>
         <button onclick="reconnectCamera()"
           style="background:#1e293b;border:1px solid #475569;color:#94a3b8;
                  font-size:11px;padding:3px 10px;border-radius:4px;cursor:pointer;
@@ -1318,6 +1324,29 @@
     btn.style.background = maskOn ? '#1c1917'      : '#1e293b';
     btn.style.color      = maskOn ? '#fbbf24'      : '#94a3b8';
     btn.style.borderColor = maskOn ? '#78350f'     : '#334155';
+  }
+
+  async function resetWorkspaceCalibration() {
+    const btn = document.getElementById('btn-workspace-reset');
+    btn.disabled = true;
+    const oldText = btn.textContent;
+    btn.textContent = 'Resetter…';
+    setStatus('Resetter arbeidsområde fra ArUco-markører…');
+    try {
+      const data = await post('/api/workspace/reset');
+      if (data.success) {
+        const ids = (data.markers_used || []).join(', ');
+        setStatus('Arbeidsområde oppdatert' + (ids ? ` med markører: ${ids}` : '') + '.');
+        refreshCalibPreview();
+      } else {
+        setStatus(data.error || 'Arbeidsområde-reset feilet.');
+      }
+    } catch (e) {
+      setStatus('Nettverksfeil: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldText;
+    }
   }
 
   // ── ArUco calibration ─────────────────────────────────────────────────────
