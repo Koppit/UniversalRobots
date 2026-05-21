@@ -25,8 +25,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent.parent / "robot" / ".env")
 
-from vision.camera import BRIOCamera  # noqa: E402
+from vision.camera import BRIOCamera, WristCamera  # noqa: E402
 from vision.homography import GEMINI_GRID, HomographyConverter  # noqa: E402
 from vision.aruco_calibrator import ArucoCalibrator  # noqa: E402
 from vision.annotation import draw_boxes, draw_contours, estimate_object_angle  # noqa: E402
@@ -93,7 +94,9 @@ logging.getLogger().setLevel(logging.DEBUG)
 # ---------------------------------------------------------------------------
 # Global state
 # ---------------------------------------------------------------------------
-_cam = BRIOCamera()
+_webcam = BRIOCamera()
+_live_camera_source = "brio"
+_live_cam = _webcam
 _client = None
 _last_capture: bytes | None = None
 _last_capture_lock = threading.Lock()
@@ -186,7 +189,7 @@ def _auto_calibrate():
         aruco = _get_aruco()
         if aruco is None:
             continue
-        frame = _cam.capture_frame()
+        frame = _webcam.capture_frame()
         if frame is None:
             continue
         detections = aruco.detect(frame)
@@ -197,7 +200,7 @@ def _auto_calibrate():
             continue
         _log("info", "Alle markører funnet – kjører auto-kalibrering…")
         _status_msg = "Auto-kalibrerer…"
-        ok, detected_ids = _homography.calibrate_aruco(_cam)
+        ok, detected_ids = _homography.calibrate_aruco(_webcam)
         if ok:
             _freeze_workspace_hull()
             _auto_calib_done = True
@@ -207,10 +210,38 @@ def _auto_calibrate():
             _log("warning", f"Auto-kalibrering feilet – kun {len(detected_ids)} markører. Prøver igjen…")
 
 
+def _camera_id(source: str, index=None) -> str:
+    return "wrist" if source == "wrist" else f"brio:{index}"
+
+
+def _active_camera_id() -> str:
+    if _live_camera_source == "wrist":
+        return "wrist"
+    return _camera_id("brio", _webcam.device_index if _webcam else None)
+
+
+def _make_camera(source: str, index=None):
+    if source == "wrist":
+        robot_ip = os.environ.get("ROBOT_IP", "192.168.0.25")
+        return WristCamera(robot_ip)
+    return BRIOCamera(device_index=index)
+
+
+def _parse_camera_selection(data: dict) -> tuple[str, int | None]:
+    camera_id = data.get("id")
+    if camera_id == "wrist":
+        return "wrist", None
+    if isinstance(camera_id, str) and camera_id.startswith("brio:"):
+        return "brio", int(camera_id.split(":", 1)[1])
+    if "index" in data:
+        return "brio", int(data["index"])
+    raise ValueError("Mangler kamera-id")
+
+
 def _list_available_cameras(max_index: int = 5) -> list[dict]:
     """Enumererer tilgjengelige kameraer raskt (uten frame-sampling).
 
-    Returnerer [{"index": int, "label": str}, ...] sortert på index.
+    Returnerer [{"id": str, "source": str, "index": int|str, "label": str}, ...].
     Bruker WMI-navn som etiketter (beste gjetning på Windows/DirectShow).
     """
     wmi_names = BRIOCamera.list_cameras()
@@ -227,16 +258,19 @@ def _list_available_cameras(max_index: int = 5) -> list[dict]:
         if cap is not None and cap.isOpened():
             cap.release()
             label = wmi_names[wmi_pos] if wmi_pos < len(wmi_names) else f"Kamera {i}"
-            result.append({"index": i, "label": label})
+            result.append({"id": _camera_id("brio", i), "source": "brio", "index": i, "label": label})
             wmi_pos += 1
+    robot_ip = os.environ.get("ROBOT_IP", "192.168.0.25")
+    result.append({"id": "wrist", "source": "wrist", "index": "wrist", "label": f"Robot wristcam ({robot_ip})"})
     return result
 
 
 def _init():
-    global _client, _status_msg
+    global _client, _status_msg, _live_cam
     _log("info", "Starter – søker etter kamera…")
     _status_msg = "Søker etter kamera…"
-    if _cam.open():
+    if _webcam.open():
+        _live_cam = _webcam
         _client = make_client()
         if _client:
             _log("info", "Kamera og Gemini-klient OK.")
@@ -267,16 +301,17 @@ def _status_frame(message: str) -> np.ndarray:
 
 def _generate_stream():
     while True:
-        frame = _cam.capture_frame()
+        frame = _live_cam.capture_frame()
         if frame is None:
             frame = _status_frame(_status_msg)
         else:
             if _calib_overlay:
-                aruco = _get_aruco()
-                if aruco is not None:
-                    detections = aruco.detect(frame)
-                    frame = aruco.draw_detections(frame, detections)
-                frame = _draw_workspace_boundary(frame)
+                if _live_camera_source == "brio":
+                    aruco = _get_aruco()
+                    if aruco is not None:
+                        detections = aruco.detect(frame)
+                        frame = aruco.draw_detections(frame, detections)
+                    frame = _draw_workspace_boundary(frame)
         _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
         yield (
             b"--frame\r\n"
@@ -322,7 +357,7 @@ def analyze():
         return jsonify({"error": "Ingen Gemini-klient (mangler API-nøkkel)."}), 500
 
     mode = (request.json or {}).get("mode", "bbox")
-    frame = _cam.capture_frame()
+    frame = _webcam.capture_frame()
     if frame is None:
         return jsonify({"error": "Ingen frame fra kamera."}), 500
 
@@ -456,38 +491,60 @@ def api_cameras():
     cameras = _list_available_cameras()
     return jsonify({
         "cameras": cameras,
-        "current": _cam.device_index if _cam else None,
+        "current": _active_camera_id(),
     })
 
 
 @app.route("/api/cameras/select", methods=["POST"])
 def api_cameras_select():
-    global _cam
-    idx = request.json.get("index")
-    if idx is None:
-        return jsonify({"error": "Mangler kamera-index"}), 400
-    if _cam:
-        _cam.close()
-    new_cam = BRIOCamera(device_index=int(idx))
+    global _live_cam, _live_camera_source, _status_msg
+    try:
+        source, idx = _parse_camera_selection(request.json or {})
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if source == "brio":
+        if _live_cam is not _webcam:
+            _live_cam.close()
+        _live_cam = _webcam
+        _live_camera_source = "brio"
+        camera_id = _active_camera_id()
+        _status_msg = "Kamera byttet."
+        _log("info", f"Byttet til kamera {camera_id}")
+        return jsonify({"ok": True, "id": camera_id, "source": source, "index": _webcam.device_index})
+
+    if _live_cam is not _webcam:
+        _live_cam.close()
+    new_cam = _make_camera(source, idx)
     if new_cam.open():
-        _cam = new_cam
-        _log("info", f"Byttet til kamera {idx}")
-        return jsonify({"ok": True, "index": int(idx)})
-    _log("error", f"Kan ikke åpne kamera {idx}")
-    return jsonify({"error": f"Kan ikke åpne kamera {idx}"}), 500
+        _live_cam = new_cam
+        _live_camera_source = source
+        camera_id = _active_camera_id()
+        _status_msg = "Kamera byttet."
+        _log("info", f"Byttet live-feed til kamera {camera_id}")
+        return jsonify({"ok": True, "id": camera_id, "source": source, "index": getattr(new_cam, "device_index", idx)})
+
+    _log("error", f"Kan ikke åpne kamera {source}:{idx}")
+    return jsonify({"error": f"Kan ikke åpne kamera {source}:{idx}"}), 500
 
 
 @app.route("/api/cameras/reconnect", methods=["POST"])
 def api_cameras_reconnect():
-    global _cam
-    idx = _cam.device_index if _cam else None
-    if _cam:
-        _cam.close()
-    new_cam = BRIOCamera(device_index=idx)  # None triggers auto-detect via find_brio()
+    global _webcam, _live_cam, _live_camera_source, _status_msg
+    idx = None if _live_camera_source == "wrist" else (_webcam.device_index if _webcam else None)
+    if _live_cam is not _webcam:
+        _live_cam.close()
+    elif _live_camera_source == "brio":
+        _webcam.close()
+    new_cam = _make_camera(_live_camera_source, idx)  # BRIO None triggers auto-detect via find_brio()
     if new_cam.open():
-        _cam = new_cam
-        _log("info", f"Kamera tilkoblet på nytt: index {new_cam.device_index}")
-        return jsonify({"ok": True, "index": new_cam.device_index})
+        if _live_camera_source == "brio":
+            _webcam = new_cam
+        _live_cam = new_cam
+        camera_id = _active_camera_id()
+        _status_msg = "Kamera tilkoblet på nytt."
+        _log("info", f"Kamera tilkoblet på nytt: {camera_id}")
+        return jsonify({"ok": True, "id": camera_id, "source": _live_camera_source, "index": getattr(new_cam, "device_index", idx)})
     _log("error", "Kan ikke koble til kamera på nytt")
     return jsonify({"error": "Kan ikke åpne kamera"}), 500
 
@@ -619,7 +676,7 @@ def assistant_command():
     if not api_key:
         return jsonify({"error": "GEMINI_API_KEY mangler."}), 500
 
-    frame = _cam.capture_frame()
+    frame = _webcam.capture_frame()
     if frame is None:
         return jsonify({"error": "Ingen frame fra kamera."}), 500
 
@@ -728,7 +785,7 @@ def _freeze_workspace_hull() -> bool:
     aruco = _get_aruco()
     if aruco is None:
         return False
-    frame = _cam.capture_frame()
+    frame = _webcam.capture_frame()
     if frame is None:
         return False
     detections = aruco.detect(frame)
@@ -783,7 +840,7 @@ def calibrate_status():
     aruco = _get_aruco()
     if aruco is None:
         return jsonify({"error": "aruco_config.json ikke funnet."}), 500
-    frame = _cam.capture_frame()
+    frame = _webcam.capture_frame()
     if frame is None:
         return jsonify({"error": "Ingen frame fra kamera."}), 500
     s = aruco.detection_status(frame)
@@ -912,7 +969,7 @@ def _draw_topdown_grid(frame: np.ndarray, x_min, x_max, y_min, y_max) -> np.ndar
 @app.route("/api/calibrate/preview")
 def calibrate_preview():
     aruco = _get_aruco()
-    frame = _cam.capture_frame()
+    frame = _webcam.capture_frame()
     if frame is None:
         return Response(status=204)
 
@@ -940,10 +997,10 @@ def calibrate_run():
     aruco = _get_aruco()
     if aruco is None:
         return jsonify({"success": False, "error": "aruco_config.json ikke funnet."}), 500
-    frame = _cam.capture_frame()
+    frame = _webcam.capture_frame()
     if frame is None:
         return jsonify({"success": False, "error": "Ingen frame fra kamera."}), 500
-    ok, detected_ids = _homography.calibrate_aruco(_cam)
+    ok, detected_ids = _homography.calibrate_aruco(_webcam)
     if ok:
         _freeze_workspace_hull()
         _status_msg = f"ArUco kalibrering fullfort med ID: {detected_ids}"

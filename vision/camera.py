@@ -4,8 +4,116 @@ import sys
 import subprocess
 import time
 import threading
+import urllib.error
+import urllib.request
 import cv2
 import numpy as np
+
+
+class WristCamera:
+    """Robotiq/UR wrist camera feed fetched from the robot HTTP image endpoint."""
+
+    def __init__(self, robot_ip: str, timeout_s: float = 1.0, fps: int = 10):
+        self.robot_ip = robot_ip
+        self.timeout_s = timeout_s
+        self.fps = fps
+        self.url = f"http://{robot_ip}:4242/current.jpg?type=color"
+        self.device_index = "wrist"
+        self.width = 1280
+        self.height = 720
+        self._latest_frame: np.ndarray | None = None
+        self._last_frame_at = 0.0
+        self._frame_count = 0
+        self._read_failures = 0
+        self._last_error: str | None = None
+        self._lock = threading.Lock()
+        self._running = False
+        self._thread: threading.Thread | None = None
+
+    def open(self) -> bool:
+        frame = self._fetch_frame()
+        if frame is None:
+            print(f"[WristCam] FEIL: Kan ikke hente bilde fra {self.url}: {self._last_error}")
+            return False
+
+        self.height, self.width = frame.shape[:2]
+        with self._lock:
+            self._latest_frame = frame
+            self._last_frame_at = time.monotonic()
+            self._frame_count = 1
+            self._read_failures = 0
+        print(f"[WristCam] Åpnet {self.url} ({self.width}x{self.height})")
+
+        self._running = True
+        self._thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self._thread.start()
+        return True
+
+    def close(self):
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=2)
+        print("[WristCam] Lukket.")
+
+    def _fetch_frame(self) -> np.ndarray | None:
+        try:
+            with urllib.request.urlopen(self.url, timeout=self.timeout_s) as response:
+                if response.status != 200:
+                    self._last_error = f"HTTP {response.status}"
+                    return None
+                data = response.read()
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            self._last_error = str(exc)
+            return None
+
+        img_array = np.asarray(bytearray(data), dtype=np.uint8)
+        frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        if frame is None or frame.size == 0:
+            self._last_error = "Ugyldig JPEG-data"
+            return None
+        self._last_error = None
+        return frame
+
+    def _capture_loop(self):
+        delay_s = 1.0 / max(1, self.fps)
+        while self._running:
+            frame = self._fetch_frame()
+            if frame is not None:
+                self.height, self.width = frame.shape[:2]
+                with self._lock:
+                    self._latest_frame = frame
+                    self._last_frame_at = time.monotonic()
+                    self._frame_count += 1
+                    self._read_failures = 0
+            else:
+                with self._lock:
+                    self._read_failures += 1
+            time.sleep(delay_s)
+
+    def capture_frame(self) -> np.ndarray | None:
+        with self._lock:
+            return self._latest_frame.copy() if self._latest_frame is not None else None
+
+    def stats(self) -> dict:
+        with self._lock:
+            age = time.monotonic() - self._last_frame_at if self._last_frame_at else None
+            return {
+                "device_index": self.device_index,
+                "backend": "HTTP wristcam",
+                "running": self._running,
+                "frame_count": self._frame_count,
+                "last_frame_age_s": round(age, 3) if age is not None else None,
+                "read_failures": self._read_failures,
+                "url": self.url,
+                "last_error": self._last_error,
+            }
+
+    def capture_jpeg_b64(self, quality: int = 85) -> str | None:
+        frame = self.capture_frame()
+        if frame is None:
+            return None
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+        return base64.b64encode(buf).decode("utf-8")
 
 
 class BRIOCamera:

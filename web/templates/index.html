@@ -1232,21 +1232,21 @@
       }
       data.cameras.forEach(cam => {
         const opt = document.createElement('option');
-        opt.value = cam.index;
+        opt.value = cam.id;
         opt.textContent = cam.label;
-        if (cam.index === data.current) opt.selected = true;
+        if (cam.id === data.current) opt.selected = true;
         sel.appendChild(opt);
       });
     } catch (_) {}
   }
 
-  async function selectCamera(idx) {
-    if (idx === '') return;
-    setStatus(`Bytter til kamera ${idx}…`);
+  async function selectCamera(id) {
+    if (id === '') return;
+    setStatus(`Bytter til kamera ${id}…`);
     try {
-      const data = await post('/api/cameras/select', { index: parseInt(idx) });
+      const data = await post('/api/cameras/select', { id });
       if (data.error) setStatus('Kamera-feil: ' + data.error);
-      else { setStatus(`Kamera ${idx} aktivt.`); fetchCameras(); }
+      else { setStatus(`Kamera ${data.id || id} aktivt.`); fetchCameras(); }
     } catch (e) {
       setStatus('Nettverksfeil: ' + e.message);
     }
@@ -1257,7 +1257,7 @@
     try {
       const data = await post('/api/cameras/reconnect');
       if (data.error) setStatus('Kamera-feil: ' + data.error);
-      else { setStatus(`Kamera ${data.index} tilkoblet på nytt.`); fetchCameras(); }
+      else { setStatus(`Kamera ${data.id || data.index} tilkoblet på nytt.`); fetchCameras(); }
     } catch (e) {
       setStatus('Nettverksfeil: ' + e.message);
     }
