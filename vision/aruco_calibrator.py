@@ -2,17 +2,18 @@
 ArUco-basert automatisk kalibrering.
 
 Plasser 4 markører (DICT_4X4_50, ID 0-3) i hjørnene av arbeidsområdet.
-Fyll inn robot-XY for hvert markør-senter i aruco_config.json.
+Fyll inn robot-XY for hvert markør-senter i config.json.
 Kjør kalibrering via web-UI eller programmatisk med ArucoCalibrator.calibrate().
 """
 
-import json
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-CONFIG_PATH = Path(__file__).parent.parent / "aruco_config.json"
+from config import get_section
+
+CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
 ARUCO_DICTS = {
     "DICT_4X4_50":   cv2.aruco.DICT_4X4_50,
@@ -30,9 +31,14 @@ class ArucoCalibrator:
     """Detekterer ArUco-markører og bygger homografi-matrise automatisk."""
 
     def __init__(self, config_path: Path | str | None = None):
-        path = Path(config_path) if config_path else CONFIG_PATH
-        with open(path) as f:
-            cfg = json.load(f)
+        if config_path:
+            import json
+            with open(Path(config_path)) as f:
+                cfg = json.load(f)
+            if "aruco" in cfg and "marker_size_m" not in cfg:
+                cfg = cfg["aruco"]
+        else:
+            cfg = get_section("aruco")
 
         self.marker_size_m: float = cfg["marker_size_m"]
         # {int(id): (rx, ry)} i meter
@@ -45,7 +51,7 @@ class ArucoCalibrator:
         if dict_name not in ARUCO_DICTS:
             valid = ", ".join(ARUCO_DICTS.keys())
             raise ValueError(
-                f"Ukjent ArUco-ordbok '{dict_name}' i aruco_config.json. "
+                f"Ukjent ArUco-ordbok '{dict_name}' i config.json. "
                 f"Gyldige valg: {valid}"
             )
         aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICTS[dict_name])

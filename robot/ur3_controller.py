@@ -1,4 +1,3 @@
-import json
 import math
 import os
 import time
@@ -6,6 +5,7 @@ import rtde_control
 from rtde_receive import RTDEReceiveInterface
 from robot.robotiq_preamble import ROBOTIQ_PREAMBLE
 from robot.transform import transform_robot_coordinates
+from config import get_section, update_section
 
 # -- Robotiq Gripper Klasse (Ekstrahert for ryddighet) --
 class RobotiqGripper(object):
@@ -71,8 +71,6 @@ class UR3Controller:
         self.joint_limits_min = None
         self.joint_limits_max = None
 
-        # Zero pose persisted alongside this file
-        self._zero_pose_path = os.path.join(os.path.dirname(__file__), "zero_pose.json")
         self._zero_pose = self._load_zero_pose()
         
         self.scale = [0.001, -0.001, -0.001]
@@ -98,21 +96,19 @@ class UR3Controller:
     # ------------------------------------------------------------------
 
     def _load_zero_pose(self) -> list | None:
-        """Load zero pose from disk. Returns None if no file exists yet."""
-        if os.path.exists(self._zero_pose_path):
-            with open(self._zero_pose_path, "r") as f:
-                data = json.load(f)
-            pose = data.get("zero_pose")
-            if pose and len(pose) == 6:
-                print(f"[UR3] Zero pose loaded: {[f'{v:.4f}' for v in pose]}")
-                return pose
+        """Load zero pose from config. Returns None if no pose exists yet."""
+        pose = get_section("robot").get("zero_pose")
+        if pose and len(pose) == 6:
+            print(f"[UR3] Zero pose loaded: {[f'{v:.4f}' for v in pose]}")
+            return pose
         return None
 
     def _save_zero_pose(self):
-        """Persist the current zero pose to disk."""
-        with open(self._zero_pose_path, "w") as f:
-            json.dump({"zero_pose": self._zero_pose}, f, indent=2)
-        print(f"[UR3] Zero pose saved to {self._zero_pose_path}")
+        """Persist the current zero pose to config."""
+        robot_config = get_section("robot")
+        robot_config["zero_pose"] = self._zero_pose
+        update_section("robot", robot_config)
+        print("[UR3] Zero pose saved to config.json")
 
     @staticmethod
     def _rotvec_to_matrix(r: list) -> list:
@@ -220,8 +216,9 @@ class UR3Controller:
         Move commands revert to absolute coordinates.
         """
         self._zero_pose = None
-        if os.path.exists(self._zero_pose_path):
-            os.remove(self._zero_pose_path)
+        robot_config = get_section("robot")
+        robot_config["zero_pose"] = None
+        update_section("robot", robot_config)
         print("[UR3] Zero pose cleared — using absolute coordinates.")
 
     def get_zero_pose(self) -> list:

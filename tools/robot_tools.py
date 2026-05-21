@@ -1,24 +1,20 @@
-import json
 import math
-from pathlib import Path
 
 from robot.transform import transform_robot_coordinates
 from vision.homography import GEMINI_GRID
+from config import get_section
 
 
-WORKSPACE_ROTATION_CONFIG_PATH = Path(__file__).parent.parent / "workspace_rotation.json"
 MM_SCALE = [0.001, -0.001, -0.001]
 
 
 def _load_workspace_rotation():
-    if not WORKSPACE_ROTATION_CONFIG_PATH.exists():
-        return [0.0, 0.0, 0.0]
     try:
-        config = json.loads(WORKSPACE_ROTATION_CONFIG_PATH.read_text())
+        config = get_section("workspace_rotation")
         return [
-            float(config.get("WORKSPACE_ROTATION_X_DEG", 0.0)),
-            float(config.get("WORKSPACE_ROTATION_Y_DEG", 0.0)),
-            float(config.get("WORKSPACE_ROTATION_Z_DEG", 0.0)),
+            float(config.get("x_deg", 0.0)),
+            float(config.get("y_deg", 0.0)),
+            float(config.get("z_deg", 0.0)),
         ]
     except Exception:
         return [0.0, 0.0, 0.0]

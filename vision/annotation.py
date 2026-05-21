@@ -14,11 +14,13 @@ COLORS = [
 
 
 def box_to_pixels(box: list, w: int, h: int) -> tuple:
-    y_min, x_min, y_max, x_max = box
-    px1 = int(x_min / 1000 * w)
-    py1 = int(y_min / 1000 * h)
-    px2 = int(x_max / 1000 * w)
-    py2 = int(y_max / 1000 * h)
+    y_min, x_min, y_max, x_max = [float(v) for v in box]
+    x_min, x_max = sorted((max(0.0, min(1000.0, x_min)), max(0.0, min(1000.0, x_max))))
+    y_min, y_max = sorted((max(0.0, min(1000.0, y_min)), max(0.0, min(1000.0, y_max))))
+    px1 = int(round(x_min / 1000 * (w - 1)))
+    py1 = int(round(y_min / 1000 * (h - 1)))
+    px2 = int(round(x_max / 1000 * (w - 1)))
+    py2 = int(round(y_max / 1000 * (h - 1)))
     return px1, py1, px2, py2, (px1 + px2) // 2, (py1 + py2) // 2
 
 
@@ -62,11 +64,22 @@ def _draw_pick_details(out: np.ndarray, obj: dict, color: tuple) -> None:
 def grabcut_mask(frame: np.ndarray, box: list) -> np.ndarray | None:
     """Kjører GrabCut med Gemini-boks som startpunkt, returnerer binær maske."""
     h, w = frame.shape[:2]
-    px1, py1, px2, py2, _, _ = box_to_pixels(box, w, h)
+    try:
+        px1, py1, px2, py2, _, _ = box_to_pixels(box, w, h)
+    except (TypeError, ValueError):
+        return None
 
-    bw = max(px2 - px1, 2)
-    bh = max(py2 - py1, 2)
-    rect = (max(0, px1), max(0, py1), min(bw, w - px1 - 1), min(bh, h - py1 - 1))
+    x = max(0, min(w - 2, px1))
+    y = max(0, min(h - 2, py1))
+    bw = max(2, min(px2 - px1, w - x - 1))
+    bh = max(2, min(py2 - py1, h - y - 1))
+    if x + bw >= w:
+        bw = w - x - 1
+    if y + bh >= h:
+        bh = h - y - 1
+    if bw < 2 or bh < 2:
+        return None
+    rect = (x, y, bw, bh)
 
     mask = np.zeros(frame.shape[:2], np.uint8)
     bgd  = np.zeros((1, 65), np.float64)
@@ -144,6 +157,13 @@ def draw_contours(frame: np.ndarray, detections: list) -> np.ndarray:
 
         seg = grabcut_mask(frame, box)
         if seg is None:
+            try:
+                px1, py1, px2, py2, cx, cy = box_to_pixels(box, *frame.shape[1::-1])
+                cv2.rectangle(out, (px1, py1), (px2, py2), color, 2)
+                cv2.circle(out, (cx, cy), 6, color, -1)
+                _draw_pick_details(out, obj, color)
+            except (TypeError, ValueError):
+                pass
             continue
 
         overlay[seg > 0] = color
@@ -164,3 +184,17 @@ def draw_contours(frame: np.ndarray, detections: list) -> np.ndarray:
         _draw_pick_details(out, obj, color)
 
     return cv2.addWeighted(out, 0.7, overlay, 0.3, 0)
+
+
+def count_segmentable(frame: np.ndarray, detections: list) -> tuple[int, int]:
+    """Return (successful_masks, boxes_seen) for diagnostics."""
+    ok = 0
+    total = 0
+    for obj in detections:
+        box = obj.get("box_2d")
+        if not box or len(box) != 4:
+            continue
+        total += 1
+        if grabcut_mask(frame, box) is not None:
+            ok += 1
+    return ok, total

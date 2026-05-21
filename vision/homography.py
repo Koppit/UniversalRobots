@@ -13,14 +13,13 @@ Bruk i drift:
   rx, ry = converter.convert_gemini_to_robot(normalized_y, normalized_x)
 """
 
-import json
-import os
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from vision.aruco_calibrator import ArucoCalibrator, CONFIG_PATH as ARUCO_CONFIG_PATH
+from vision.aruco_calibrator import ArucoCalibrator
+from config import get_section, update_section
 
 
 # XY-posisjoner (meter) roboten beveger seg til under kalibrering.
@@ -34,7 +33,7 @@ CALIBRATION_POINTS_ROBOT = [
     (0.450, 0.200),
 ]
 
-SAVE_FILE = Path(__file__).parent.parent / "homography_matrix.json"
+SAVE_FILE = Path(__file__).parent.parent / "config.json"
 GEMINI_GRID = 1000  # Gemini bruker 0-1000 normaliserte koordinater
 
 
@@ -124,7 +123,7 @@ class HomographyConverter:
         Automatisk kalibrering via ArUco-markører.
 
         Fanger ett bilde fra kameraet, detekterer markørene definert i
-        aruco_config.json, og beregner homografi-matrisen fra hjørnene.
+        config.json, og beregner homografi-matrisen fra hjørnene.
 
         Returns:
             (success, detected_ids)
@@ -133,7 +132,7 @@ class HomographyConverter:
         self._cam_width = camera.width
         self._cam_height = camera.height
 
-        calibrator = ArucoCalibrator(config_path or ARUCO_CONFIG_PATH)
+        calibrator = ArucoCalibrator(config_path)
 
         frame = camera.capture_frame()
         if frame is None:
@@ -259,14 +258,16 @@ class HomographyConverter:
         }
         if self._topdown_bounds is not None:
             data["topdown_bounds"] = list(self._topdown_bounds)
-        SAVE_FILE.write_text(json.dumps(data, indent=2))
+        update_section("homography", data)
 
     def load(self) -> bool:
         """Laster homografi-matrise fra SAVE_FILE. Returnerer True ved suksess."""
         if not SAVE_FILE.exists():
             return False
         try:
-            data = json.loads(SAVE_FILE.read_text())
+            data = get_section("homography")
+            if not data.get("H"):
+                return False
             self.H = np.array(data["H"], dtype=np.float64)
             self._cam_width = data.get("cam_width", 1280)
             self._cam_height = data.get("cam_height", 720)
@@ -280,7 +281,7 @@ class HomographyConverter:
             return False
 
     def is_calibrated(self) -> bool:
-        return SAVE_FILE.exists()
+        return bool(get_section("homography").get("H"))
 
     # ------------------------------------------------------------------
     # Koordinatkonvertering

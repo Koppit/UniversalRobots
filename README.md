@@ -42,7 +42,7 @@ copy .env.example .env
 
 ### Calibration
 - **ArUco automatic calibration** — four fiducial markers at the work area corners; one button press computes the full camera-to-robot perspective homography
-- Calibration saved to `homography_matrix.json`, loaded automatically at startup
+- Calibration saved to `config.json`, loaded automatically at startup
 - **Coordinate verification tool** — click any point in the live feed to read its robot XY in mm; optionally move the robot to that exact point
 
 ### Robot control
@@ -73,7 +73,7 @@ The very first thing to do when configuring this system is to define the **centr
    ```bash
    python robot/set_robot_zero.py
    ```
-   This reads the current TCP pose via RTDE and writes it to `robot/zero_pose.json`. All future moves specified in mm are relative to this pose.
+   This reads the current TCP pose via RTDE and writes it to the `robot.zero_pose` section in `config.json`. All future moves specified in mm are relative to this pose.
 
 > You only need to repeat this if the robot is physically relocated or the work surface changes.
 
@@ -90,7 +90,7 @@ Print four ArUco markers from the **DICT_4X4_50** dictionary, IDs 1–4, at **4 
 | 3 | +435 | +285 | front-right |
 | 4 | +435 | −285 | back-right |
 
-These values are defined in `aruco_config.json`. If your work area is a different size, edit the coordinates there to match.
+These values are defined in the `aruco` section of `config.json`. If your work area is a different size, edit the coordinates there to match.
 
 The camera must have a clear overhead view of all four markers without obstruction.
 
@@ -105,7 +105,7 @@ With the markers in place and the camera running:
 3. The four marker-status chips show which IDs the camera currently sees (green = detected)
 4. When all four are green, click **Kalibrer nå**
 5. The system captures a frame, detects the marker centres, and computes the homography matrix via `cv2.findHomography` (RANSAC)
-6. The result is written to `homography_matrix.json` and loaded automatically on all future server starts
+6. The result is written to the `homography` section of `config.json` and loaded automatically on all future server starts
 
 After this step, the **Operasjon** tab will show robot XY coordinates (mm) next to each detected object.
 
@@ -127,15 +127,12 @@ Use the **Verifiser kalibrering** panel in the **Kalibrering** tab to confirm ac
 | File | Created by | Purpose |
 |------|-----------|---------|
 | `.env` | user | `GEMINI_API_KEY` |
-| `aruco_config.json` | user | ArUco marker IDs → robot XY positions (mm) and marker size |
-| `homography_matrix.json` | calibration | 3×3 homography matrix + camera resolution |
-| `robot/zero_pose.json` | `set_robot_zero.py` | Reference TCP pose for relative coordinate moves |
+| `config.json` | user + calibration | ArUco markers, homography, workspace rotation, and robot zero pose |
+| `.env` / `robot/.env` | user | API keys, robot IP, runtime environment settings |
 
 ---
 
 ## File overview
-
-See [file-Overview.md](file-Overview.md) for the complete listing with status (active / standalone / test / legacy).
 
 Core runtime files loaded by `web/server.py`:
 
@@ -144,7 +141,6 @@ robot/
   ur3_controller.py     # UR3Controller + RobotiqGripper (RTDE)
   robotiq_preamble.py   # URScript preamble constant used by ur3_controller
   transform.py          # 6-axis coordinate transformation utilities
-  zero_pose.json        # Written by set_robot_zero.py
 
 vision/
   camera.py             # BRIOCamera — BRIO capture with auto-detection
@@ -163,8 +159,8 @@ web/
   server.py             # Flask server — all API endpoints
   templates/index.html  # Web UI (vanilla HTML/CSS/JS, no build step)
 
-aruco_config.json       # Marker IDs and their robot XY positions (mm)
-homography_matrix.json  # Auto-generated; do not edit manually
+config.py               # Shared config.json loader/saver
+config.json             # Project configuration and calibration state
 requirements.txt        # Python dependencies
 ```
 
@@ -172,7 +168,6 @@ Standalone scripts (not imported by the server):
 
 ```
 robot/set_robot_zero.py   # Run once to capture work area centre as reference pose
-ai/mcp_server.py          # FastMCP server wrapping the Flask API — for Claude MCP access
 robot/mcp_server.py       # Early direct-robot MCP server (port 8001); superseded by ai/mcp_server.py
 ```
 

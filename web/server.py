@@ -16,7 +16,6 @@ import logging
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-import json
 import cv2
 import numpy as np
 from flask import Flask, Response, render_template, jsonify, request
@@ -30,13 +29,13 @@ load_dotenv(Path(__file__).parent.parent / "robot" / ".env")
 from vision.camera import BRIOCamera, WristCamera  # noqa: E402
 from vision.homography import GEMINI_GRID, HomographyConverter  # noqa: E402
 from vision.aruco_calibrator import ArucoCalibrator  # noqa: E402
-from vision.annotation import draw_boxes, draw_contours, estimate_object_angle  # noqa: E402
+from vision.annotation import count_segmentable, draw_boxes, draw_contours, estimate_object_angle  # noqa: E402
 from ai.detection import make_client, detect_objects  # noqa: E402
 from robot.transform import transform_robot_coordinates  # noqa: E402
+from config import get_section  # noqa: E402
 
 # mm → m, inverter y- og z-akse (samme som test_robot.py)
 MM_SCALE = [0.001, -0.001, -0.001]
-WORKSPACE_ROTATION_CONFIG_PATH = Path(__file__).parent.parent / "workspace_rotation.json"
 WRIST_CAMERA_ANALYSIS_CONTEXT = """\
 Auxiliary wrist-camera perspective:
 - The primary image remains the calibrated webcam/top-down workspace image.
@@ -50,14 +49,12 @@ Auxiliary wrist-camera perspective:
 
 
 def _load_workspace_rotation():
-    if not WORKSPACE_ROTATION_CONFIG_PATH.exists():
-        return [0.0, 0.0, 0.0]
     try:
-        config = json.loads(WORKSPACE_ROTATION_CONFIG_PATH.read_text())
+        config = get_section("workspace_rotation")
         return [
-            float(config.get("WORKSPACE_ROTATION_X_DEG", 0.0)),
-            float(config.get("WORKSPACE_ROTATION_Y_DEG", 0.0)),
-            float(config.get("WORKSPACE_ROTATION_Z_DEG", 0.0)),
+            float(config.get("x_deg", 0.0)),
+            float(config.get("y_deg", 0.0)),
+            float(config.get("z_deg", 0.0)),
         ]
     except Exception:
         return [0.0, 0.0, 0.0]
@@ -432,7 +429,12 @@ def analyze():
                 except (TypeError, ValueError):
                     det["angle_deg"] = None
                     det["pick_yaw_deg"] = None
-        annotated = draw_contours(gemini_frame, detections) if mode == "grabcut" else draw_boxes(gemini_frame, detections)
+        if mode == "grabcut":
+            seg_ok, seg_total = count_segmentable(gemini_frame, detections)
+            _log("info", f"GrabCut-masker: {seg_ok}/{seg_total}")
+            annotated = draw_contours(gemini_frame, detections)
+        else:
+            annotated = draw_boxes(gemini_frame, detections)
         _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
         with _last_capture_lock:
             _last_capture = buf.tobytes()
@@ -831,13 +833,10 @@ def assistant_transcribe():
 def _get_aruco() -> ArucoCalibrator | None:
     global _aruco
     if _aruco is None:
-        config = Path(__file__).parent.parent / "aruco_config.json"
-        if not config.exists():
-            return None
         try:
-            _aruco = ArucoCalibrator(config)
+            _aruco = ArucoCalibrator()
         except Exception as exc:
-            print(f"[ArUco] Feil ved lasting av config: {exc}")
+            print(f"[ArUco] Feil ved lasting av config.json: {exc}")
             return None
     return _aruco
 
@@ -912,7 +911,7 @@ def calibrate_overlay_toggle():
 def calibrate_status():
     aruco = _get_aruco()
     if aruco is None:
-        return jsonify({"error": "aruco_config.json ikke funnet."}), 500
+        return jsonify({"error": "ArUco-config mangler i config.json."}), 500
     frame = _webcam.capture_frame()
     if frame is None:
         return jsonify({"error": "Ingen frame fra kamera."}), 500
@@ -1079,7 +1078,7 @@ def calibrate_run():
     global _status_msg
     aruco = _get_aruco()
     if aruco is None:
-        return jsonify({"success": False, "error": "aruco_config.json ikke funnet."}), 500
+        return jsonify({"success": False, "error": "ArUco-config mangler i config.json."}), 500
     frame = _webcam.capture_frame()
     if frame is None:
         return jsonify({"success": False, "error": "Ingen frame fra kamera."}), 500
