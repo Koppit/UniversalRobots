@@ -1,182 +1,239 @@
-# UniversalRobots
+# Universal Robots Vision Pick-and-Place
 
-Computer vision and robotic arm control system. A UR3 robot with a Robotiq gripper is controlled via a web UI that uses a Logitech BRIO camera and Google Gemini vision to detect objects and execute pick-and-place operations. ArUco fiducial markers calibrate the camera-to-robot coordinate transform automatically.
+This project controls a Universal Robots UR3 arm with a Robotiq gripper from a browser-based vision interface. A fixed overhead camera sees the full work area, ArUco markers calibrate camera pixels to robot coordinates, and Gemini vision detects objects and suggests grasp points for pick-and-place.
 
----
+The web app has two main image views: the left image is the live camera feed, and the right image is the latest analyzed image with object annotations.
 
-## Quick Start
+![Web operation overview](pictures/web_operation.jpg)
 
-> For first-time physical setup, see [First-time Setup](#first-time-setup) below.
+## How It Works
 
-```bash
-# 1. Install dependencies
+The system uses four coordinate steps:
+
+1. The overhead camera captures the work area and the four ArUco markers.
+2. ArUco calibration creates a homography and a corrected top-down view.
+3. Gemini analyzes that top-down image and returns object boxes, grasp points, and object angle.
+4. The server converts the selected image point into robot XY coordinates, applies workspace tilt correction, and sends the motion to the UR3.
+
+The long yellow line drawn on an object in the analyzed image indicates the planned gripper placement/orientation for picking.
+
+The robot wrist camera can be used as a secondary perspective for analysis, but the overhead camera remains the primary calibrated view because it sees the full workspace and markers.
+
+## Hardware Setup
+
+### Robot Zero Pose
+
+Before using the system, set the robot zero pose. This defines the center of the work area and the reference frame used by all relative robot moves.
+
+Move the robot to the position shown below. The end effector should be level when capturing the zero pose.
+
+![Zero pose](pictures/zero_pose.jpg)
+
+Then run:
+
+```powershell
+.\.venv\Scripts\python.exe robot\set_robot_zero.py
+```
+
+The captured pose is stored in `config.json` under:
+
+```json
+"robot": {
+  "zero_pose": [...]
+}
+```
+
+Repeat this step if the robot, table, camera, or work surface position changes.
+
+### Camera Placement
+
+The overhead camera must have a clear view of the full work area and all four ArUco markers. This is required for workspace segmentation, calibration, and creating the top-down view.
+
+![Camera position](pictures/camera_position.jpg)
+
+### ArUco Markers
+
+The current setup expects four `DICT_4X4_50` markers with IDs `1` to `4`. Their marker centers are configured in `config.json`:
+
+```json
+"aruco": {
+  "marker_size_m": 0.04,
+  "markers": {
+    "1": [-0.415, -0.265],
+    "2": [-0.415,  0.265],
+    "3": [ 0.415,  0.265],
+    "4": [ 0.415, -0.265]
+  }
+}
+```
+
+The labels are 40 mm by 40 mm, so the outer workspace bounds are 20 mm beyond the marker centers.
+
+### Table Tilt Correction
+
+If the table is not level, correct it in `config.json`:
+
+```json
+"workspace_rotation": {
+  "x_deg": 0.0,
+  "y_deg": -0.535,
+  "z_deg": 0.0
+}
+```
+
+This correction is applied when converting workspace moves to robot coordinates.
+
+## Software Setup
+
+1. Create and activate a Python environment.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\activate
+```
+
+2. Install dependencies.
+
+```powershell
 pip install -r requirements.txt
-
-# 2. Create .env and add your API key
-copy .env.example .env
-# Edit .env: set GEMINI_API_KEY=...
-
-# 3. Start the web server
-.venv\Scripts\python web\server.py
-
-# 4. Open in browser
-# http://localhost:5000
 ```
 
-- Connect to the robot in the **Operasjon** tab (default IP `192.168.0.25`)
-- Run ArUco calibration in the **Kalibrering** tab before using pick-and-place
+3. Configure environment variables.
 
----
+Create `.env` in the project root for Gemini:
 
-## What is implemented
-
-### Camera
-- **Logitech BRIO** USB camera with automatic detection (`BRIOCamera.find_brio()`)
-- Background capture thread — frames are always available without blocking
-- Runtime camera switching via web UI dropdown
-
-### Object detection
-- **Google Gemini** `gemini-robotics-er-1.6-preview` model
-- Two annotation modes: bounding boxes and GrabCut contour segmentation
-- Detected objects listed with their robot XY coordinates in mm (once calibrated)
-
-### Calibration
-- **ArUco automatic calibration** — four fiducial markers at the work area corners; one button press computes the full camera-to-robot perspective homography
-- Calibration saved to `config.json`, loaded automatically at startup
-- **Coordinate verification tool** — click any point in the live feed to read its robot XY in mm; optionally move the robot to that exact point
-
-### Robot control
-- **UR3** 6-axis arm via `ur-rtde` (RTDE protocol over Ethernet)
-- **Robotiq gripper** via URScript
-- Manual jog: XY/Z/rotation in mm and degrees from the web UI
-- Pick and place: select detected object → click destination → execute
-- Emergency stop button
-
-### MCP integration
-- `ai/mcp_server.py` exposes the robot and camera as MCP tools usable directly from Claude
-- Supports natural-language commands: *"pick the red cube and place it on the tray"*
-
----
-
-## First-time Setup
-
-### Step 1 — Define the robot's work area centre (`set_robot_zero`)
-
-The very first thing to do when configuring this system is to define the **centre point of the robot's work area**. This is a manual one-time process.
-
-**Why:** All robot XY coordinates in the system are relative to this centre point. The four ArUco markers are positioned at ±435 mm (X) and ±285 mm (Y) from it. If this pose is wrong, every coordinate will be off.
-
-**How:**
-
-1. Physically jog the robot arm (using the teach pendant or `web/server.py` manual jog) to the centre of the intended work surface — the point equidistant between where the four ArUco markers will be placed.
-2. Run the zero-capture script:
-   ```bash
-   python robot/set_robot_zero.py
-   ```
-   This reads the current TCP pose via RTDE and writes it to the `robot.zero_pose` section in `config.json`. All future moves specified in mm are relative to this pose.
-
-> You only need to repeat this if the robot is physically relocated or the work surface changes.
-
----
-
-### Step 2 — Place the ArUco markers
-
-Print four ArUco markers from the **DICT_4X4_50** dictionary, IDs 1–4, at **4 cm** physical size. Attach them flat to the work surface at these positions relative to the zero pose:
-
-| Marker ID | X (mm) | Y (mm) | Corner |
-|-----------|-------:|-------:|--------|
-| 1 | −435 | −285 | back-left |
-| 2 | −435 | +285 | front-left |
-| 3 | +435 | +285 | front-right |
-| 4 | +435 | −285 | back-right |
-
-These values are defined in the `aruco` section of `config.json`. If your work area is a different size, edit the coordinates there to match.
-
-The camera must have a clear overhead view of all four markers without obstruction.
-
----
-
-### Step 3 — Run ArUco calibration
-
-With the markers in place and the camera running:
-
-1. Start the web server and open [http://localhost:5000](http://localhost:5000)
-2. Go to the **Kalibrering** tab
-3. The four marker-status chips show which IDs the camera currently sees (green = detected)
-4. When all four are green, click **Kalibrer nå**
-5. The system captures a frame, detects the marker centres, and computes the homography matrix via `cv2.findHomography` (RANSAC)
-6. The result is written to the `homography` section of `config.json` and loaded automatically on all future server starts
-
-After this step, the **Operasjon** tab will show robot XY coordinates (mm) next to each detected object.
-
----
-
-### Step 4 — Verify the calibration
-
-Use the **Verifiser kalibrering** panel in the **Kalibrering** tab to confirm accuracy:
-
-1. Click **Aktiver klikk-verifisering**
-2. Click a known physical point in the live feed (e.g. a marker corner)
-3. The panel shows the mapped robot XY in mm
-4. Optionally click **Flytt robot hit** to move the robot to that point and check physically
-
----
-
-## Configuration files
-
-| File | Created by | Purpose |
-|------|-----------|---------|
-| `.env` | user | `GEMINI_API_KEY` |
-| `config.json` | user + calibration | ArUco markers, homography, workspace rotation, and robot zero pose |
-| `.env` / `robot/.env` | user | API keys, robot IP, runtime environment settings |
-
----
-
-## File overview
-
-Core runtime files loaded by `web/server.py`:
-
-```
-robot/
-  ur3_controller.py     # UR3Controller + RobotiqGripper (RTDE)
-  robotiq_preamble.py   # URScript preamble constant used by ur3_controller
-  transform.py          # 6-axis coordinate transformation utilities
-
-vision/
-  camera.py             # BRIOCamera — BRIO capture with auto-detection
-  aruco_calibrator.py   # ArUco marker detection and homography building
-  homography.py         # HomographyConverter — pixel-to-robot coordinate mapping
-  annotation.py         # OpenCV draw helpers (boxes, contours, GrabCut)
-
-ai/
-  detection.py          # detect_objects() via Gemini API
-  gemini_agent.py       # Task-driven agent (natural language → robot action)
-
-tools/
-  robot_tools.py        # RobotActionTools — pick/place sequences bridging Gemini→robot
-
-web/
-  server.py             # Flask server — all API endpoints
-  templates/index.html  # Web UI (vanilla HTML/CSS/JS, no build step)
-
-config.py               # Shared config.json loader/saver
-config.json             # Project configuration and calibration state
-requirements.txt        # Python dependencies
+```env
+GEMINI_API_KEY=your_api_key_here
 ```
 
-Standalone scripts (not imported by the server):
+Create or edit `robot/.env` for the robot:
 
+```env
+ROBOT_IP=192.168.0.25
+ROBOT_AUTO_CONNECT=false
 ```
-robot/set_robot_zero.py   # Run once to capture work area centre as reference pose
-robot/mcp_server.py       # Early direct-robot MCP server (port 8001); superseded by ai/mcp_server.py
+
+Keeping `ROBOT_AUTO_CONNECT=false` lets the web server start even if the robot is offline.
+
+## Running The System
+
+Start the Flask server:
+
+```powershell
+.\.venv\Scripts\python.exe web\server.py
 ```
 
----
+Open a browser:
 
-## Documentation
+```text
+http://localhost:5000
+```
 
-- [file-Overview.md](file-Overview.md) — Complete file listing with active/standalone/test/legacy status
-- [docs/api.md](docs/api.md) — All Flask API endpoints with request/response shapes
-- [docs/architecture.md](docs/architecture.md) — Component map and data flow
-- [docs/coordinates.md](docs/coordinates.md) — Coordinate systems and conversions
-- [web/README.md](web/README.md) — Web server internals and data flow
+Then:
+
+1. Open the `Kalibrering` tab.
+2. Confirm all ArUco markers are visible.
+3. Click `Kalibrer nå`.
+4. Go to the `Operasjon` tab.
+5. Click `Koble til robot`.
+6. Click `Update` to analyze the work area.
+
+## Web Interface Operation
+
+![Web operation overview](pictures/web_operation.jpg)
+
+### Live View
+
+The left image is the live feed. It can show the overhead camera or the wrist camera, but analysis always uses the overhead camera.
+
+### Analyzed Image
+
+The right image is the latest analyzed frame. Click `Update` to run object detection again. Click `GrabCut` to use contour-style segmentation.
+
+Detected objects appear with:
+
+- bounding box or contour
+- pickup point
+- gripper orientation line
+- robot X/Y coordinates when calibrated
+
+### Pick And Place
+
+1. Click an object in the analyzed image to select it.
+2. Click a destination point in the same analyzed image.
+3. The robot starts the pick-and-place sequence automatically.
+
+The object angle and the long gripper line are used to rotate the gripper before picking.
+
+### AI Assistant
+
+You can type a command in the AI assistant text box, for example:
+
+```text
+Pick the red object and place it on the right side.
+```
+
+You can also use the microphone button to start and stop a voice recording of a command.
+
+### Manual Controls
+
+Manual controls can:
+
+- connect or disconnect the robot
+- move to a typed XYZ/RX/RY/RZ pose
+- return the robot to home position
+- open or close the gripper
+- stop the robot
+
+Use manual moves carefully. Coordinates are relative to the zero pose.
+
+## Calibration Verification
+
+In the `Kalibrering` tab:
+
+1. Click `Aktiver klikk-verifisering`.
+2. Click a known point in the camera image.
+3. Check the displayed X/Y coordinate.
+4. Optionally move the robot to that point to verify the calibration physically.
+
+If X/Y movement is mirrored, check the top-down orientation and the coordinate conversion settings in `web/server.py` and `tools/robot_tools.py`.
+
+## Configuration
+
+All project calibration and runtime geometry settings are in root `config.json`.
+
+Important sections:
+
+- `aruco`: marker dictionary, marker size, and marker center coordinates
+- `homography`: saved calibration matrix and top-down bounds
+- `workspace_rotation`: table/workspace tilt correction
+- `robot.zero_pose`: robot reference pose
+
+Secrets and machine-specific values stay in `.env` and `robot/.env`.
+
+## Important Files
+
+```text
+web/server.py              Flask server and API endpoints
+web/templates/index.html   Browser UI
+config.json                Calibration and geometry config
+config.py                  Shared config loader/saver
+robot/set_robot_zero.py    Captures robot zero pose
+robot/ur3_controller.py    UR3 and Robotiq control
+tools/robot_tools.py       Pick/place and robot action helpers
+vision/camera.py           Overhead and wrist camera capture
+vision/aruco_calibrator.py ArUco marker detection
+vision/homography.py       Camera-to-robot coordinate mapping
+vision/annotation.py       Detection drawing and GrabCut segmentation
+ai/detection.py            Gemini object detection
+ai/gemini_agent.py         Natural-language robot command planning
+```
+
+## Troubleshooting
+
+- Server starts but robot is offline: this is expected when `ROBOT_AUTO_CONNECT=false`; connect from the web UI.
+- Robot moves to wrong location: verify zero pose, ArUco calibration, and workspace rotation.
+- Calibration view is wrong: make sure all four markers are visible and marker IDs/positions match `config.json`.
+- Picks are high/low at one side of the table: adjust `workspace_rotation`.
+- Segmentation looks wrong: click `Update` again, confirm the top-down image is correct, and check server logs for `GrabCut-masker`.
+- After robot collision/protective stop: clear the stop on the robot, disconnect in the UI if needed, then press `Koble til robot` again.
