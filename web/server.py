@@ -24,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
-load_dotenv(Path(__file__).parent.parent / "robot" / ".env")
 
 from vision.camera import BRIOCamera, WristCamera  # noqa: E402
 from vision.homography import GEMINI_GRID, HomographyConverter  # noqa: E402
@@ -60,6 +59,20 @@ def _load_workspace_rotation():
         return [0.0, 0.0, 0.0]
 
 WORKSPACE_ROTATION = _load_workspace_rotation()
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _mm_to_robot(x, y, z, rx_deg=0.0, ry_deg=0.0, rz_deg=0.0):
@@ -155,7 +168,11 @@ def _start_robot_connect() -> tuple[dict, int]:
                 _log("error", "Tilkobling mislyktes.")
                 _status_msg = "FEIL: Tilkobling til robot mislyktes."
                 return
-            robot.set_workspace_limits(x=(-1.5, 1.5), y=(-1.5, 0.1), z=(-1.10, 1.55))
+            robot.set_workspace_limits(
+                x=(_env_float("ROBOT_WORKSPACE_X_MIN_M", -1.5), _env_float("ROBOT_WORKSPACE_X_MAX_M", 1.5)),
+                y=(_env_float("ROBOT_WORKSPACE_Y_MIN_M", -1.5), _env_float("ROBOT_WORKSPACE_Y_MAX_M", 0.1)),
+                z=(_env_float("ROBOT_WORKSPACE_Z_MIN_M", -1.10), _env_float("ROBOT_WORKSPACE_Z_MAX_M", 1.55)),
+            )
             robot_tools = RobotActionTools(
                 robot,
                 _homography,
@@ -296,8 +313,11 @@ def _init():
             _log("warning", "Kamera OK, men GEMINI_API_KEY mangler.")
             _status_msg = "Klar – GEMINI_API_KEY mangler!"
         threading.Thread(target=_auto_calibrate, daemon=True).start()
-        _log("info", "Kamera tilkoblet – starter automatisk robottilkobling…")
-        _start_robot_connect()
+        if _env_bool("ROBOT_AUTO_CONNECT", default=False):
+            _log("info", "ROBOT_AUTO_CONNECT aktiv – starter automatisk robottilkobling…")
+            _start_robot_connect()
+        else:
+            _log("info", "Robot auto-tilkobling er av. Bruk knappen «Koble til robot».")
     else:
         _log("error", "Kamera ikke funnet.")
         _status_msg = "FEIL: Kamera ikke funnet."

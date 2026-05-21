@@ -1,7 +1,0 @@
-flask>=3.0
-httpx>=0.27
-opencv-python>=4.8
-numpy>=1.24
-google-genai>=1.0
-ur-rtde
-python-dotenv>=1.0

@@ -17,7 +17,6 @@ Run only at zero calibration manually. Not to be included in production.
 
 if __name__ == "__main__":
     load_dotenv(ROOT / ".env", verbose=True)
-    load_dotenv(ROOT / "robot" / ".env", verbose=True)
     
     robot_ip = os.environ.get("ROBOT_IP", "192.168.0.25")
 

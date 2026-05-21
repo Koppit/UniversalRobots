@@ -95,22 +95,26 @@ python -m venv .venv
 2. Install dependencies.
 
 ```powershell
-pip install -r requirements.txt
+uv sync
 ```
 
 3. Configure environment variables.
 
-Create `.env` in the project root for Gemini:
+Create `.env` in the project root:
 
 ```env
 GEMINI_API_KEY=your_api_key_here
-```
-
-Create or edit `robot/.env` for the robot:
-
-```env
 ROBOT_IP=192.168.0.25
+GRIPPER_SPEED=100
 ROBOT_AUTO_CONNECT=false
+ROBOT_PICK_HEIGHT_MM=2
+ROBOT_PLACE_ABOVE_PICK_MM=2
+ROBOT_HOVER_HEIGHT_MM=100
+ROBOT_HOME_X_MM=0
+ROBOT_HOME_Y_MM=100
+ROBOT_HOME_Z_MM=420
+ROBOT_MOVEJ_SPEED=3
+ROBOT_MOVEJ_ACCELERATION=2
 ```
 
 Keeping `ROBOT_AUTO_CONNECT=false` lets the web server start even if the robot is offline.
@@ -209,7 +213,21 @@ Important sections:
 - `workspace_rotation`: table/workspace tilt correction
 - `robot.zero_pose`: robot reference pose
 
-Secrets and machine-specific values stay in `.env` and `robot/.env`.
+Secrets, machine-specific values, and robot working parameters stay in `.env`.
+
+Common robot working parameters:
+
+- `ROBOT_HOVER_HEIGHT_MM`: safe travel height over the table
+- `ROBOT_PICK_HEIGHT_MM`: pick height over the table
+- `ROBOT_PLACE_ABOVE_PICK_MM`: default place height offset above pick height
+- `ROBOT_HOME_X_MM`, `ROBOT_HOME_Y_MM`, `ROBOT_HOME_Z_MM`: manual/home parking position
+- `ROBOT_HOME_RX_DEG`, `ROBOT_HOME_RY_DEG`, `ROBOT_HOME_RZ_DEG`: home parking orientation
+- `ROBOT_GRIPPER_YAW_OFFSET_DEG`: gripper yaw offset used for object picking
+- `GRIPPER_SPEED`: Robotiq gripper speed, 0-100
+- `ROBOT_MOVEJ_SPEED`, `ROBOT_MOVEJ_ACCELERATION`: joint-space move tuning
+- `ROBOT_MOVEL_SPEED`, `ROBOT_MOVEL_ACCELERATION`: linear move tuning
+- `ROBOT_LIFT_SPEED`, `ROBOT_LIFT_ACCELERATION`: safe lift tuning
+- `ROBOT_WORKSPACE_*`: absolute robot workspace safety limits in meters
 
 ## Important Files
 

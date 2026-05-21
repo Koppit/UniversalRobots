@@ -1,4 +1,5 @@
 import math
+import os
 
 from robot.transform import transform_robot_coordinates
 from vision.homography import GEMINI_GRID
@@ -6,6 +7,13 @@ from config import get_section
 
 
 MM_SCALE = [0.001, -0.001, -0.001]
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
 
 
 def _load_workspace_rotation():
@@ -28,17 +36,7 @@ class RobotActionTools:
     #   world_z = -relative_z
     # Så vi sender -z_mm/1000 som relativ Z → roboten går OPP.
     # Dette tilsvarer MM_SCALE Z = -0.001 i server.py.
-    z_height_hover_mm = 100   # 10 cm over bordet
-    z_height_pick_mm  =   2   # 2 mm over bordet (plukkhøyde)
-    z_height_place_mm = z_height_pick_mm + 2  # 2 mm over pick-høyden
-    # Home position visited after pickup and after place (safe transit point)
-    x_home_mm =   0
-    y_home_mm =  100
-    z_home_mm = 420
-
     _WORK_ROTATION = [0.0, 0.0, 0.0]  # RX=0 RY=0 — verktøy peker rett ned under arbeid
-    _HOME_ROTATION = [0.523598776, 0.0, 0.0]  # parkeringsorientering
-    gripper_yaw_offset_deg = -90.0  # pick yaw offset so fingers close across the object
 
     def __init__(self, robot_controller, coordinate_converter, logger=None, topdown_flip_horizontal: bool = False):
         self.robot = robot_controller
@@ -46,6 +44,19 @@ class RobotActionTools:
         self._log = logger or print
         self.topdown_flip_horizontal = topdown_flip_horizontal
         self.workspace_rotation = _load_workspace_rotation()
+        self.z_height_hover_mm = _env_float("ROBOT_HOVER_HEIGHT_MM", 100.0)
+        self.z_height_pick_mm = _env_float("ROBOT_PICK_HEIGHT_MM", 2.0)
+        place_default = self.z_height_pick_mm + _env_float("ROBOT_PLACE_ABOVE_PICK_MM", 2.0)
+        self.z_height_place_mm = _env_float("ROBOT_PLACE_HEIGHT_MM", place_default)
+        self.x_home_mm = _env_float("ROBOT_HOME_X_MM", 0.0)
+        self.y_home_mm = _env_float("ROBOT_HOME_Y_MM", 100.0)
+        self.z_home_mm = _env_float("ROBOT_HOME_Z_MM", 420.0)
+        self._HOME_ROTATION = [
+            math.radians(_env_float("ROBOT_HOME_RX_DEG", 30.0)),
+            math.radians(_env_float("ROBOT_HOME_RY_DEG", 0.0)),
+            math.radians(_env_float("ROBOT_HOME_RZ_DEG", 0.0)),
+        ]
+        self.gripper_yaw_offset_deg = _env_float("ROBOT_GRIPPER_YAW_OFFSET_DEG", -90.0)
 
     def _lift_to_hover(self):
         """Lift arm to hover height at its current XY before any horizontal sweep.

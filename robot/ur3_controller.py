@@ -7,6 +7,13 @@ from robot.robotiq_preamble import ROBOTIQ_PREAMBLE
 from robot.transform import transform_robot_coordinates
 from config import get_section, update_section
 
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
 # -- Robotiq Gripper Klasse (Ekstrahert for ryddighet) --
 class RobotiqGripper(object):
     def __init__(self, rtde_c): 
@@ -313,7 +320,7 @@ class UR3Controller:
             self.connected = False
             return None
 
-    def move_to_xyz(self, coords, speed=3, acceleration=2):
+    def move_to_xyz(self, coords, speed=None, acceleration=None):
         """Flytter armen lineært (moveL) til spesifikke X,Y,Z i meter uten å endre rotasjonen.
 
         If a zero pose has been set, coords are treated as relative to that frame.
@@ -322,6 +329,8 @@ class UR3Controller:
         if not self.connected:
             print(f"[UR3] (mock — ikke tilkoblet)")
             return
+        speed = _env_float("ROBOT_MOVEL_SPEED", 3.0) if speed is None else speed
+        acceleration = _env_float("ROBOT_MOVEL_ACCELERATION", 2.0) if acceleration is None else acceleration
 
         target = self._apply_reference_frame(coords)
         print(f"[UR3] moveL  abs → X:{target[0]:.4f}  Y:{target[1]:.4f}  Z:{target[2]:.4f}")
@@ -331,7 +340,7 @@ class UR3Controller:
             self.connected = False
             raise RuntimeError(f"Robot mistet tilkobling: {e}") from e
 
-    def move_to_xyz_j(self, coords, speed=3, acceleration=2, safe_z: float = None):
+    def move_to_xyz_j(self, coords, speed=None, acceleration=None, safe_z: float = None):
         """Moves the arm using MOVEJ (joint-space interpolation via inverse kinematics).
 
         Compared to moveL, joint-space motion follows arc paths that avoid
@@ -349,6 +358,8 @@ class UR3Controller:
         if not self.connected:
             print(f"[Mock UR3] moveJ to X:{coords[0]:.3f}, Y:{coords[1]:.3f}, Z:{coords[2]:.3f}")
             return
+        speed = _env_float("ROBOT_MOVEJ_SPEED", 3.0) if speed is None else speed
+        acceleration = _env_float("ROBOT_MOVEJ_ACCELERATION", 2.0) if acceleration is None else acceleration
 
         target = self._apply_reference_frame(coords)
 
@@ -382,13 +393,15 @@ class UR3Controller:
             self.connected = False
             raise RuntimeError(f"Robot mistet tilkobling: {e}") from e
 
-    def lift_to_absolute_z(self, abs_z: float, speed=0.5, acceleration=0.5):
+    def lift_to_absolute_z(self, abs_z: float, speed=None, acceleration=None):
         """Lift TCP to abs_z (absolute metres) keeping current XY and orientation.
 
         Does nothing if already at or above abs_z, or if not connected.
         """
         if not self.connected:
             return
+        speed = _env_float("ROBOT_LIFT_SPEED", 0.5) if speed is None else speed
+        acceleration = _env_float("ROBOT_LIFT_ACCELERATION", 0.5) if acceleration is None else acceleration
         current = self.get_pose()
         if current is None or current[2] >= abs_z:
             return
@@ -438,7 +451,7 @@ class UR3Controller:
 
         return {"result": "Success"}
 
-    def move_to_joints(self, q: list, speed=0.5, acceleration=0.5):
+    def move_to_joints(self, q: list, speed=None, acceleration=None):
         """Moves directly to a joint configuration [j0..j5] in radians using MOVEJ.
 
         Use this when you know the exact joint angles you want (e.g. a safe home pose).
@@ -447,6 +460,8 @@ class UR3Controller:
         if not self.connected:
             print(f"[Mock UR3] moveJ joints {[f'{math.degrees(a):.1f}°' for a in q]}")
             return
+        speed = _env_float("ROBOT_JOINT_SPEED", 0.5) if speed is None else speed
+        acceleration = _env_float("ROBOT_JOINT_ACCELERATION", 0.5) if acceleration is None else acceleration
 
         try:
             self._check_joint_limits(q)
