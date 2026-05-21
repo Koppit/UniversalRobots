@@ -1,4 +1,26 @@
+import json
 import math
+from pathlib import Path
+
+from robot.transform import transform_robot_coordinates
+
+
+WORKSPACE_ROTATION_CONFIG_PATH = Path(__file__).parent.parent / "workspace_rotation.json"
+MM_SCALE = [0.001, -0.001, -0.001]
+
+
+def _load_workspace_rotation():
+    if not WORKSPACE_ROTATION_CONFIG_PATH.exists():
+        return [0.0, 0.0, 0.0]
+    try:
+        config = json.loads(WORKSPACE_ROTATION_CONFIG_PATH.read_text())
+        return [
+            float(config.get("WORKSPACE_ROTATION_X_DEG", 0.0)),
+            float(config.get("WORKSPACE_ROTATION_Y_DEG", 0.0)),
+            float(config.get("WORKSPACE_ROTATION_Z_DEG", 0.0)),
+        ]
+    except Exception:
+        return [0.0, 0.0, 0.0]
 
 
 class RobotActionTools:
@@ -10,20 +32,21 @@ class RobotActionTools:
     # Så vi sender -z_mm/1000 som relativ Z → roboten går OPP.
     # Dette tilsvarer MM_SCALE Z = -0.001 i server.py.
     z_height_hover_mm = 100   # 10 cm over bordet
-    z_height_pick_mm  =   5   # 5 mm over bordet (plukkhøyde)
-    z_height_place_mm =  10   # 1 cm over bordet (plassering)
+    z_height_pick_mm  =   2   # 2 mm over bordet (plukkhøyde)
+    z_height_place_mm = z_height_pick_mm + 2  # 2 mm over pick-høyden
     # Home position visited after pickup and after place (safe transit point)
     x_home_mm =   0
-    y_home_mm =  50
+    y_home_mm =  -125
     z_home_mm = 200
 
-    _ROTATION = [0.0, 0.0, 0.0]  # RX=0 RY=0 RZ=0 — verktøy peker rett ned
+    _ROTATION = [0.0, 0.0, 3.14]  # RX=0 RY=0 RZ=0 — verktøy peker rett ned
     gripper_yaw_offset_deg = -90.0  # pick yaw offset so fingers close across the object
 
     def __init__(self, robot_controller, coordinate_converter, logger=None):
         self.robot = robot_controller
         self.homography = coordinate_converter
         self._log = logger or print
+        self.workspace_rotation = _load_workspace_rotation()
 
     def _lift_to_hover(self):
         """Lift arm to hover height at its current XY before any horizontal sweep.
@@ -62,14 +85,16 @@ class RobotActionTools:
 
     def _move(self, label: str, rx: float, ry: float, z_mm: float, yaw_deg: float | None = None):
         """Sender en bevegelse. z_mm er høyde over bordet i mm (positiv = over)."""
-        # Zero-pose rotation Rx(π) inverts both Y and Z in the robot frame.
-        # Negate both so _apply_reference_frame flips them back to world-frame values.
-        ry_rel = -ry
-        z_rel  = -z_mm / 1000
+        x_rel, y_rel, z_rel = transform_robot_coordinates(
+            [[rx * 1000, ry * 1000, z_mm, 0.0, 0.0, 0.0]],
+            scale=MM_SCALE,
+            rotation=self.workspace_rotation,
+        )[0][:3]
         rotation = self._rotation_for_yaw(yaw_deg)
-        coords = [rx, ry_rel, z_rel, *rotation]
+        coords = [x_rel, y_rel, z_rel, *rotation]
         self._log("info",
             f"  {label}: X={rx*1000:+.1f}mm Y={ry*1000:+.1f}mm Z=+{z_mm:.1f}mm (over bordet)"
+            f"  korr=({x_rel*1000:+.1f}, {y_rel*1000:+.1f}, {z_rel*1000:+.1f})mm"
             f"  rx={rotation[0]:.3f} ry={rotation[1]:.3f} rz={rotation[2]:.3f}")
         self.robot.move_to_xyz_j(coords)
 
